@@ -5,15 +5,16 @@
   const state = { fields: C.fields.map(f => ({...f})), sources: [], current: '', records: [], selected: new Set(), imported: new Set(), filter: 'all', query: '', page: 1, pageSize: 25, dirty: false };
   let sequence = 0, toastTimer;
   const uid = () => String(++sequence);
+  const icon = name => `<svg class="ui-icon" aria-hidden="true"><use href="#icon-${name}"/></svg>`;
   const esc = value => String(value ?? '').replace(/[&<>"']/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[s]));
-  function toast(message, error = false) { $('toast').textContent = message; $('toast').className = 'toast' + (error ? ' error' : ''); $('toast').hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => $('toast').hidden = true, 5000); }
+  function toast(message, error = false) { $('toast').innerHTML = icon(error ? 'alert' : 'check-circle') + `<span>${esc(message)}</span>`; $('toast').className = 'toast' + (error ? ' error' : ''); $('toast').hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => $('toast').hidden = true, 5000); }
   function libraryReady() { if (window.XLSX) return true; toast('Excel 解析库未加载，请确认 vendor 文件完整后刷新。', true); return false; }
   function current() { return state.sources.find(s => s.id === state.current); }
   function settings(source) { return source.configs[source.sheet]; }
   function rowsFor(source) { return XLSX.utils.sheet_to_json(source.book.Sheets[source.sheet], { header: 1, defval: '', raw: false, blankrows: true }); }
   function initConfig(source) { if (!source.configs[source.sheet]) { const rows = rowsFor(source), header = C.detectHeader(rows, state.fields); source.configs[source.sheet] = { header, mapping: C.autoMap(rows[header] || [], state.fields) }; } }
   function renderFields() {
-    $('fieldList').innerHTML = state.fields.map(f => `<span class="managed-field ${C.fixedKeys.includes(f.key) ? 'fixed-field' : ''}"><span>${esc(f.label)}</span>${C.fixedKeys.includes(f.key) ? '<small title="此字段不可删除">固定</small>' : `<button type="button" data-remove-field="${f.key}" aria-label="删除字段 ${esc(f.label)}">×</button>`}</span>`).join('');
+    $('fieldList').innerHTML = state.fields.map(f => `<span class="managed-field ${C.fixedKeys.includes(f.key) ? 'fixed-field' : ''}"><span>${esc(f.label)}</span>${C.fixedKeys.includes(f.key) ? `<small title="此字段不可删除">${icon('lock')}固定</small>` : `<button type="button" data-remove-field="${f.key}" aria-label="删除字段 ${esc(f.label)}" title="删除字段 ${esc(f.label)}">${icon('close')}</button>`}</span>`).join('');
     $('fieldCount').textContent = `${state.fields.length} / 40`;
     $('guideFields').innerHTML = state.fields.map(f => `<span>${esc(f.label)}</span>`).join('');
     document.querySelectorAll('#dataHeader th[data-field]').forEach(th => th.remove());
@@ -70,7 +71,7 @@
     if (current()) $('mappingPanel').scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
   function renderSources() {
-    $('fileList').innerHTML = state.sources.map(s => `<div class="file-item"><span>▤ ${esc(s.name)}</span><small>${s.book.SheetNames.length} 张工作表</small><button data-source="${s.id}" aria-label="设置 ${esc(s.name)}">设置 →</button></div>`).join('');
+    $('fileList').innerHTML = state.sources.map(s => `<div class="file-item"><span>${icon('file')}${esc(s.name)}</span><small>${s.book.SheetNames.length} 张工作表</small><button data-source="${s.id}" aria-label="设置 ${esc(s.name)}">设置 ${icon('arrow-right')}</button></div>`).join('');
     $('mappingPanel').hidden = !state.sources.length;
     $('sourceSelect').innerHTML = state.sources.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
     $('sourceSelect').value = state.current;
@@ -112,20 +113,22 @@
     $('exportBtn').disabled = !state.records.length;
     $('deleteBtn').disabled = !state.selected.size; $('selectedCount').textContent = state.selected.size ? `(${state.selected.size})` : '';
     $('step3').classList.toggle('active', !!state.records.length);
-    document.querySelectorAll('.stat[data-filter]').forEach(b => b.classList.toggle('active', b.dataset.filter === state.filter));
+    document.querySelectorAll('.stat[data-filter]').forEach(b => { const active = b.dataset.filter === state.filter; b.classList.toggle('active', active); b.setAttribute('aria-pressed', String(active)); });
   }
-  function statusHTML(r, duplicates) { const issues = C.issues(r, state.fields); return `<span class="status-pill ${issues.length ? 'review' : ''}" title="${esc(issues.join('；') || '资料可用')}">${issues.length ? '待完善' : '可用'}</span>${duplicates.has(r.id) ? '<br><span class="status-pill duplicate" title="邮箱相同，或公司与客户名称相同；请人工核对。">疑似重复</span>' : ''}`; }
+  function statusHTML(r, duplicates) { const issues = C.issues(r, state.fields); return `<span class="status-pill ${issues.length ? 'review' : ''}" title="${esc(issues.join('；') || '资料可用')}">${icon(issues.length ? 'alert' : 'check-circle')}${issues.length ? '待完善' : '可用'}</span>${duplicates.has(r.id) ? `<br><span class="status-pill duplicate" title="邮箱相同，或公司与客户名称相同；请人工核对。">${icon('copy')}疑似重复</span>` : ''}`; }
   function renderData() {
     const duplicates = C.duplicateIds(state.records), list = filtered(duplicates), pages = Math.max(1, Math.ceil(list.length / state.pageSize));
-    state.page = Math.min(state.page, pages); const visible = list.slice((state.page - 1) * state.pageSize, state.page * state.pageSize);
+    state.page = Math.max(1, Math.min(state.page, pages)); const visible = list.slice((state.page - 1) * state.pageSize, state.page * state.pageSize);
     updateMetrics(duplicates);
     $('dataBody').innerHTML = visible.map(r => `<tr data-id="${r.id}"><td><input type="checkbox" data-select="${r.id}" aria-label="选择 ${esc(r.company || r.contact || '客户')}" ${state.selected.has(r.id) ? 'checked' : ''}></td><td class="status-cell">${statusHTML(r,duplicates)}</td>${state.fields.map(f => `<td contenteditable="true" role="textbox" spellcheck="false" aria-label="${esc(f.label)}" data-key="${f.key}">${esc(r[f.key])}</td>`).join('')}<td class="muted">${esc(r.source)}${r.sourceRow ? '<br>第 ' + r.sourceRow + ' 行' : ''}</td></tr>`).join('');
     $('emptyState').hidden = !!visible.length;
     $('emptyState').querySelector('h3').textContent = state.records.length ? '没有匹配的客户' : '一份整齐的客户表，从这里开始';
     $('emptyState').querySelector('p').textContent = state.records.length ? '试试其他搜索词，或切换到全部客户。' : '导入你的第一份表格，或体验示例数据。';
     $('emptyDemoBtn').hidden = !!state.records.length;
-    $('resultInfo').textContent = `共 ${state.records.length} 条客户 · 当前匹配 ${list.length} 条 · 每页 ${state.pageSize} 条`;
-    $('pageInfo').textContent = `${state.page} / ${pages}`; $('prevPage').disabled = state.page <= 1; $('nextPage').disabled = state.page >= pages;
+    const first = list.length ? (state.page - 1) * state.pageSize + 1 : 0, last = Math.min(state.page * state.pageSize, list.length);
+    $('resultInfo').textContent = `共 ${state.records.length} 条客户 · 当前匹配 ${list.length} 条 · 显示 ${first}–${last} 条`;
+    $('pageSize').value = String(state.pageSize);
+    $('pageInfo').textContent = `第 ${state.page} / ${pages} 页`; $('prevPage').disabled = state.page <= 1; $('nextPage').disabled = state.page >= pages;
     $('selectAll').checked = !!visible.length && visible.every(r => state.selected.has(r.id)); $('selectAll').indeterminate = visible.some(r => state.selected.has(r.id)) && !$('selectAll').checked;
   }
   function editCell(target) {
@@ -178,6 +181,7 @@
   $('addRowBtn').onclick = () => { state.records.unshift({ id:uid(),...Object.fromEntries(state.fields.map(f => [f.key,''])),source:'手动新增',sourceRow:'' }); state.dirty = true; state.page = 1; state.filter = 'all'; state.query = ''; $('searchInput').value = ''; renderData(); $('dataBody').querySelector('[data-key=company]').focus(); };
   $('deleteBtn').onclick = () => { if (!confirm(`删除选中的 ${state.selected.size} 条客户？该操作无法撤销。`)) return; state.records = state.records.filter(r => !state.selected.has(r.id)); state.selected.clear(); state.dirty = true; renderData(); };
   $('prevPage').onclick = () => {state.page--;renderData();}; $('nextPage').onclick = () => {state.page++;renderData();};
+  $('pageSize').onchange = e => { const size = Number(e.target.value); if (![10,25,50,100].includes(size)) return; state.pageSize = size; state.page = 1; renderData(); };
   $('helpBtn').onclick = () => $('helpDialog').showModal(); $('closeHelp').onclick = () => $('helpDialog').close();
   window.addEventListener('beforeunload', e => { if (state.dirty && state.records.length) { e.preventDefault(); e.returnValue = ''; } });
   $('fieldForm').onsubmit = addCustomField;
