@@ -130,7 +130,7 @@
     document.querySelectorAll('.stat[data-filter]').forEach(b => { const active = b.dataset.filter === state.filter; b.classList.toggle('active', active); b.setAttribute('aria-pressed', String(active)); });
     $('missingNotice').hidden = !missing || state.filter === 'missing';
     $('missingNoticeText').textContent = `${missing} 条记录暂未加入全部客户，请到“缺少主体”补充并确认。`;
-    $('missingGuide').hidden = state.filter !== 'missing';
+    document.querySelectorAll('[data-rule-filter]').forEach(panel => { panel.hidden = panel.dataset.ruleFilter !== state.filter; });
   }
   function statusHTML(r, duplicates) {
     if (C.pendingIdentity(r)) return `<span class="status-pill missing">${icon('info')}${C.missingIdentity(r) ? '缺少主体' : '待确认加入'}</span><small class="status-detail">${C.missingIdentity(r) ? '缺少固定字段：' + esc(C.missingFixedFields(r).join('、')) : '已补齐三项固定字段，确认后加入全部客户。'}</small>`;
