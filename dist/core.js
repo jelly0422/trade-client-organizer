@@ -13,16 +13,14 @@
   const normalize = v => clean(v).toLowerCase().replace(/[\s_\-\/（）()]/g, '');
   const fixedKeys = Object.freeze(['company', 'contact', 'email']);
   const metadataLabels = ['来源', '来源文件 / 工作表', '原始行号', '校对提示', '状态', '记录分类', '原始内容'];
-  const missingIdentity = record => fixedKeys.every(key => !clean(record[key]));
+  const missingIdentity = record => fixedKeys.some(key => !clean(record[key]));
   const pendingIdentity = record => Boolean(record.pendingIdentity) || missingIdentity(record);
   const missingFixedFields = record => fields.filter(f => fixedKeys.includes(f.key) && !clean(record[f.key])).map(f => f.label);
   function admitRecord(record) {
-    if (missingIdentity(record)) throw Error('请先补充客户名称、公司名、邮箱中的至少一项。');
+    if (missingIdentity(record)) throw Error('请先补齐固定字段：' + missingFixedFields(record).join('、') + '。');
     return { ...record, pendingIdentity: false };
   }
   const reviewRules = [
-    { label: '缺少公司名和客户名称', description: '公司名与客户名称同时为空；仅缺其中一项不触发。', check: r => !clean(r.company) && !clean(r.contact) },
-    { label: '缺少联系方式', description: '邮箱为空，且电话为空或“电话”字段已被删除。其他自定义联系方式暂不参与判断。', check: (r, schema) => !clean(r.email) && !(schema.some(f => f.key === 'phone') && clean(r.phone)) },
     { label: '邮箱格式待核对', description: '邮箱非空，但不符合基本格式。多个邮箱用逗号、分号或换行分隔，每一项都需符合格式。', check: r => Boolean(clean(r.email)) && !clean(r.email).split(/[;,；，\n]+/).every(e => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e.trim())) }
   ];
   function addField(schema, name, key) {
@@ -97,7 +95,7 @@
     const duplicates = duplicateIds(records.filter(r => !pendingIdentity(r)));
     return [[...headers, '来源文件 / 工作表', '原始行号', '校对提示', '记录分类'], ...records.map(r => [
       ...schema.map(f => String(r[f.key] ?? '')), String(r.source ?? ''), String(r.sourceRow || ''),
-      [...(pendingIdentity(r) ? [missingIdentity(r) ? '缺少固定字段：客户名称、公司名、邮箱' : '已补充主体，待确认加入全部客户'] : []), ...issues(r, schema), ...(duplicates.has(r.id) ? ['疑似重复'] : [])].join('；'),
+      [...(pendingIdentity(r) ? [missingIdentity(r) ? '缺少固定字段：' + missingFixedFields(r).join('、') : '已补齐三项固定字段，待确认加入全部客户'] : []), ...issues(r, schema), ...(duplicates.has(r.id) ? ['疑似重复'] : [])].join('；'),
       pendingIdentity(r) ? '缺少主体' : '全部客户'
     ])];
   }
