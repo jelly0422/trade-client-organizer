@@ -12,7 +12,19 @@
   const clean = v => String(v ?? '').trim();
   const normalize = v => clean(v).toLowerCase().replace(/[\s_\-\/（）()]/g, '');
   const fixedKeys = Object.freeze(['company', 'contact', 'email']);
-  const metadataLabels = ['来源', '来源文件 / 工作表', '原始行号', '校对提示', '状态'];
+  const metadataLabels = ['来源', '来源文件 / 工作表', '原始行号', '校对提示', '状态', '记录分类', '原始内容'];
+  const missingIdentity = record => fixedKeys.every(key => !clean(record[key]));
+  const pendingIdentity = record => Boolean(record.pendingIdentity) || missingIdentity(record);
+  const missingFixedFields = record => fields.filter(f => fixedKeys.includes(f.key) && !clean(record[f.key])).map(f => f.label);
+  function admitRecord(record) {
+    if (missingIdentity(record)) throw Error('请先补充客户名称、公司名、邮箱中的至少一项。');
+    return { ...record, pendingIdentity: false };
+  }
+  const reviewRules = [
+    { label: '缺少公司名和客户名称', description: '公司名与客户名称同时为空；仅缺其中一项不触发。', check: r => !clean(r.company) && !clean(r.contact) },
+    { label: '缺少联系方式', description: '邮箱为空，且电话为空或“电话”字段已被删除。其他自定义联系方式暂不参与判断。', check: (r, schema) => !clean(r.email) && !(schema.some(f => f.key === 'phone') && clean(r.phone)) },
+    { label: '邮箱格式待核对', description: '邮箱非空，但不符合基本格式。多个邮箱用逗号、分号或换行分隔，每一项都需符合格式。', check: r => Boolean(clean(r.email)) && !clean(r.email).split(/[;,；，\n]+/).every(e => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e.trim())) }
+  ];
   function addField(schema, name, key) {
     const label = clean(name);
     if (!normalize(label)) throw Error('请输入字段名称。');
@@ -52,20 +64,17 @@
     });
     return best;
   }
-  function mappedRows(rows, headerIndex, mapping, source, schema = fields) {
+  function mappedRows(rows, headerIndex, mapping, source, schema = fields, rowOffset = 0, columnOffset = 0) {
     return rows.slice(headerIndex + 1).flatMap((row, i) => {
       if (!row.some(v => clean(v))) return [];
       const record = Object.fromEntries(schema.map(f => [f.key, mapping[f.key] === '' || mapping[f.key] === undefined ? '' : clean(row[Number(mapping[f.key])])]));
-      if (!schema.some(f => record[f.key])) return [];
-      return [{ ...record, source, sourceRow: headerIndex + i + 2 }];
+      const pending = missingIdentity(record);
+      const sourceCells = pending ? row.map((value, column) => ({ column: columnOffset + column + 1, label: clean(rows[headerIndex]?.[column]) || `第 ${columnOffset + column + 1} 列`, value: String(value ?? '') })).filter(cell => clean(cell.value)) : [];
+      return [{ ...record, source, sourceRow: rowOffset + headerIndex + i + 2, pendingIdentity: pending, sourceCells }];
     });
   }
   function issues(record, schema = fields) {
-    const result = [];
-    if (!clean(record.company) && !clean(record.contact)) result.push('缺少公司名和客户名称');
-    if (!clean(record.email) && !(schema.some(f => f.key === 'phone') && clean(record.phone))) result.push('缺少联系方式');
-    if (clean(record.email) && !clean(record.email).split(/[;,；，\n]+/).every(e => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e.trim()))) result.push('邮箱格式待核对');
-    return result;
+    return reviewRules.filter(rule => rule.check(record, schema)).map(rule => rule.label);
   }
   function duplicateIds(records) {
     const groups = new Map(), ids = new Set();
@@ -85,13 +94,17 @@
   function exportMatrix(records, schema = fields, template = false) {
     const headers = schema.map(f => f.label);
     if (template) return [headers];
-    const duplicates = duplicateIds(records);
-    return [[...headers, '来源文件 / 工作表', '原始行号', '校对提示'], ...records.map(r => [
+    const duplicates = duplicateIds(records.filter(r => !pendingIdentity(r)));
+    return [[...headers, '来源文件 / 工作表', '原始行号', '校对提示', '记录分类'], ...records.map(r => [
       ...schema.map(f => String(r[f.key] ?? '')), String(r.source ?? ''), String(r.sourceRow || ''),
-      [...issues(r, schema), ...(duplicates.has(r.id) ? ['疑似重复'] : [])].join('；')
+      [...(pendingIdentity(r) ? [missingIdentity(r) ? '缺少固定字段：客户名称、公司名、邮箱' : '已补充主体，待确认加入全部客户'] : []), ...issues(r, schema), ...(duplicates.has(r.id) ? ['疑似重复'] : [])].join('；'),
+      pendingIdentity(r) ? '缺少主体' : '全部客户'
     ])];
   }
-  const api = {fields, fixedKeys, addField, removeField, exportMatrix, clean, autoMap, detectHeader, mappedRows, issues, duplicateIds, csvCell};
+  function recoveryMatrix(records) {
+    return [['来源文件 / 工作表', '原始行号', '原始列序号', '原始表头', '原始内容'], ...records.flatMap(r => (r.sourceCells || []).map(cell => [String(r.source ?? ''), String(r.sourceRow || ''), String(cell.column), cell.label, cell.value]))];
+  }
+  const api = {fields, fixedKeys, addField, removeField, exportMatrix, recoveryMatrix, clean, autoMap, detectHeader, mappedRows, issues, reviewRules, missingIdentity, pendingIdentity, missingFixedFields, admitRecord, duplicateIds, csvCell};
   root.TradeCore = api;
   if (typeof module !== 'undefined') module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);

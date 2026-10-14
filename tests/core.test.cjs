@@ -79,3 +79,70 @@ test('deleted phone no longer satisfies contact validation and restoring it reta
   const restored = C.addField(schema,'电话','custom_restore');
   assert.deepEqual(C.issues(record,restored),[]); assert.equal(C.autoMap(['WhatsApp'],restored).phone,'0');
 });
+test('unmapped nonblank rows are retained with their original values, including zero', () => {
+  const rows = [['Company','Email','Other'], ['Acme','a@example.com',''], ['','','客户乙：需要 10000 件'], [], ['','','   '], ['','','0'], ['','','',0]];
+  const records = C.mappedRows(rows,0,C.autoMap(rows[0]),'source.xlsx');
+  assert.equal(records.length,4);
+  assert.deepEqual(records.map(r=>r.sourceRow),[2,3,6,7]);
+  assert.equal(C.pendingIdentity(records[0]),false);
+  assert.equal(C.pendingIdentity(records[1]),true);
+  assert.deepEqual(records[1].sourceCells,[{column:3,label:'Other',value:'客户乙：需要 10000 件'}]);
+  assert.deepEqual(records[3].sourceCells,[{column:4,label:'第 4 列',value:'0'}]);
+});
+test('zero matched columns still preserve all nonblank source rows', () => {
+  const rows = [['未知列'],['仅有未识别内容'],['第二条'],['']];
+  const records = C.mappedRows(rows,0,C.autoMap(rows[0]),'unmatched.csv');
+  assert.equal(records.length,2);
+  assert.ok(records.every(r=>C.pendingIdentity(r)));
+  assert.equal(records[0].sourceCells[0].value,'仅有未识别内容');
+});
+test('missing identity requires all three fixed fields to be blank', () => {
+  assert.equal(C.missingIdentity({company:' ',contact:'\t',email:'\n',phone:'123',product:'cups'}),true);
+  for (const key of C.fixedKeys) assert.equal(C.missingIdentity({[key]:'provided'}),false);
+  assert.equal(C.missingIdentity({company:0}),false);
+  assert.deepEqual(C.missingFixedFields({company:'Acme'}),['客户名称','邮箱']);
+});
+test('admission needs a fixed field and explicit confirmation without losing source data', () => {
+  const pending = C.mappedRows([['Other'],['待补充的需求']],0,{},'original')[0];
+  assert.throws(()=>C.admitRecord(pending),/至少一项/);
+  const edited = {...pending,company:'Acme'};
+  assert.equal(C.pendingIdentity(edited),true);
+  const accepted=C.admitRecord(edited);
+  assert.equal(C.pendingIdentity(accepted),false);
+  assert.equal(edited.pendingIdentity,true);
+  assert.deepEqual(accepted.sourceCells,pending.sourceCells);
+  assert.deepEqual(C.issues(accepted),['缺少联系方式']);
+  assert.equal(C.pendingIdentity({...accepted,company:''}),true);
+});
+test('source recovery keeps actual row and column positions for offset worksheets', () => {
+  const sheet = { '!ref':'C5:D7', C5:{t:'s',v:'Company'},D5:{t:'s',v:'Other'},C6:{t:'s',v:'Acme'},D7:{t:'s',v:'未知主体需求'} };
+  const book=XLSX.utils.book_new();XLSX.utils.book_append_sheet(book,sheet,'Offset');
+  const parsed=XLSX.read(XLSX.write(book,{type:'buffer',bookType:'xlsx'}),{type:'buffer'}).Sheets.Offset;
+  const rows=XLSX.utils.sheet_to_json(parsed,{header:1,defval:'',raw:false,blankrows:true});
+  const offset=XLSX.utils.decode_range(parsed['!ref']).s;
+  const records=C.mappedRows(rows,0,C.autoMap(rows[0]),'offset.xlsx',C.fields,offset.r,offset.c);
+  assert.deepEqual(records.map(r=>r.sourceRow),[6,7]);
+  assert.equal(records[1].sourceCells[0].column,4);
+  assert.equal(C.recoveryMatrix(records)[1][1],'7');
+});
+test('review rules distinguish identity, contact methods and individual email formats', () => {
+  assert.deepEqual(C.issues({email:'person@example.com'}),['缺少公司名和客户名称']);
+  assert.deepEqual(C.issues({company:'Acme'}),['缺少联系方式']);
+  assert.deepEqual(C.issues({company:'Acme',phone:'123'}),[]);
+  assert.deepEqual(C.issues({contact:'Alex',email:'a@example.com；b@example.com\nc@example.com'}),[]);
+  assert.deepEqual(C.issues({contact:'Alex',email:'a@example.com;invalid',phone:'123'}),['邮箱格式待核对']);
+  assert.deepEqual(C.issues({company:'Acme',custom_phone:'123'}),['缺少联系方式']);
+  assert.deepEqual(C.issues({company:'Acme',product:'',country:'' ,email:'a@example.com'}),[]);
+});
+test('exports distinguish queued records and retain original content after admission', () => {
+  const pending=C.mappedRows([['Extra'],['=untrusted text']],0,{},'original.xlsx')[0];
+  const ready={...pending,company:'Acme',id:'pending'};
+  const accepted={...C.admitRecord(ready),id:'accepted'};
+  const matrix=C.exportMatrix([ready,accepted]);
+  const classification=matrix[0].indexOf('记录分类'), hints=matrix[0].indexOf('校对提示');
+  assert.equal(matrix[1][classification],'缺少主体');
+  assert.equal(matrix[2][classification],'全部客户');
+  assert.match(matrix[1][hints],/待确认加入/);
+  const raw=C.recoveryMatrix([accepted]);assert.equal(raw[1][4],'=untrusted text');
+  const sheet=XLSX.utils.aoa_to_sheet(raw);assert.equal(sheet.E2.t,'s');assert.equal(sheet.E2.f,undefined);
+});
