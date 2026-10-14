@@ -17,6 +17,7 @@
   function mappedSource(source) { const cfg = settings(source); return C.mappedRows(rowsFor(source), cfg.header, cfg.mapping, source.name + ' / ' + source.sheet, state.fields, rowOffset(source), columnOffset(source)); }
   const customers = () => state.records.filter(r => !C.pendingIdentity(r));
   const duplicatesForCustomers = () => C.duplicateIds(customers());
+  const selectedPending = () => state.records.filter(r => state.selected.has(r.id) && C.pendingIdentity(r));
   function initConfig(source) { if (!source.configs[source.sheet]) { const rows = rowsFor(source), header = C.detectHeader(rows, state.fields); source.configs[source.sheet] = { header, mapping: C.autoMap(rows[header] || [], state.fields) }; } }
   function renderFields() {
     $('fieldList').innerHTML = state.fields.map(f => `<span class="managed-field ${C.fixedKeys.includes(f.key) ? 'fixed-field' : ''}"><span>${esc(f.label)}</span>${C.fixedKeys.includes(f.key) ? `<small title="此字段不可删除">${icon('lock')}固定</small>` : `<button type="button" data-remove-field="${f.key}" aria-label="删除字段 ${esc(f.label)}" title="删除字段 ${esc(f.label)}">${icon('close')}</button>`}</span>`).join('');
@@ -118,6 +119,13 @@
     $('statReview').textContent = accepted.filter(r => C.issues(r, state.fields).length).length; $('statDuplicate').textContent = duplicates.size;
     $('exportBtn').disabled = !state.records.length;
     $('deleteBtn').disabled = !state.selected.size; $('selectedCount').textContent = state.selected.size ? `(${state.selected.size})` : '';
+    const pendingSelection = selectedPending(), ready = pendingSelection.filter(r => !C.missingIdentity(r)).length, incomplete = pendingSelection.length - ready;
+    $('admitSelectedBtn').hidden = state.filter !== 'missing';
+    $('admitSelectedBtn').disabled = !ready;
+    $('admitCount').textContent = ready ? `(${ready})` : '';
+    $('admitHint').hidden = state.filter !== 'missing';
+    $('admitHint').textContent = pendingSelection.length ? `已勾选 ${pendingSelection.length} 条 · 可加入 ${ready} 条${incomplete ? ` · ${incomplete} 条待补齐，将继续保留` : ''}` : '勾选记录后批量加入；客户名称、公司名、邮箱需全部填齐。';
+    $('admitSelectedBtn').title = ready ? `加入已勾选且三项齐全的 ${ready} 条记录` : pendingSelection.length ? '请先补齐所选记录的客户名称、公司名、邮箱' : '请先勾选需要加入的记录';
     $('step3').classList.toggle('active', !!state.records.length);
     document.querySelectorAll('.stat[data-filter]').forEach(b => { const active = b.dataset.filter === state.filter; b.classList.toggle('active', active); b.setAttribute('aria-pressed', String(active)); });
     $('missingNotice').hidden = !missing || state.filter === 'missing';
@@ -129,7 +137,7 @@
     const issues = C.issues(r, state.fields);
     return `<span class="status-pill ${issues.length ? 'review' : ''}" title="${esc(issues.join('；') || '通过基础检查，联系方式未核实')}">${icon(issues.length ? 'alert' : 'check-circle')}${issues.length ? '待完善' : '可用'}</span>${issues.length ? `<small class="status-detail">${esc(issues.join('；'))}</small>` : ''}${duplicates.has(r.id) ? `<br><span class="status-pill duplicate" title="疑似重复仅提示，请人工核对。">${icon('copy')}疑似重复</span>` : ''}`;
   }
-  function actionHTML(r) { return (C.pendingIdentity(r) ? `<button class="secondary-btn admit-btn" data-admit="${r.id}" ${C.missingIdentity(r) ? 'disabled' : ''} title="客户名称、公司名、邮箱三项全部填写后，才能确认加入全部客户">${icon('plus')}加入全部客户</button>` : '') + (r.sourceCells?.length ? `<button class="text-btn" data-original="${r.id}">${icon('file')}查看原始内容</button>` : ''); }
+  function actionHTML(r) { return r.sourceCells?.length ? `<button class="text-btn" data-original="${r.id}">${icon('file')}查看原始内容</button>` : ''; }
   function sourceHTML(r) { return `${esc(r.source)}${r.sourceRow ? '<br>第 ' + r.sourceRow + ' 行' : ''}`; }
   function showOriginal(id) {
     const r = state.records.find(record => record.id === id); if (!r) return;
@@ -137,9 +145,18 @@
     $('originalContent').innerHTML = (r.sourceCells || []).map(cell => `<div><dt>${esc(cell.label)} · 第 ${cell.column} 列</dt><dd>${esc(cell.value)}</dd></div>`).join('');
     $('originalDialog').showModal();
   }
-  function admitCustomer(id) {
-    const index = state.records.findIndex(r => r.id === id); if (index < 0) return;
-    try { state.records[index] = C.admitRecord(state.records[index]); state.selected.delete(id); state.dirty = true; renderData(); toast('已加入全部客户，可继续查看待完善提示。'); }
+  function admitSelected() {
+    if (state.filter !== 'missing') return;
+    const selected = selectedPending(), ready = selected.filter(r => !C.missingIdentity(r));
+    if (!ready.length) { toast('请先勾选记录，并补齐客户名称、公司名、邮箱。', true); return; }
+    try {
+      const accepted = new Map(ready.map(r => [r.id, C.admitRecord(r)]));
+      state.records = state.records.map(r => accepted.get(r.id) || r);
+      accepted.forEach((r, id) => state.selected.delete(id)); state.dirty = true;
+      renderData();
+      const remaining = selected.length - ready.length;
+      toast(`已将 ${ready.length} 条记录加入全部客户。${remaining ? `${remaining} 条尚未补齐，继续保留在缺少主体。` : '可继续查看待完善提示。'}`);
+    }
     catch (error) { toast(error.message, true); }
   }
   function renderData() {
@@ -211,18 +228,19 @@
   $('searchInput').oninput = e => { state.query = e.target.value.trim().toLowerCase(); state.page = 1; renderData(); };
   document.querySelectorAll('[data-filter]').forEach(b => b.onclick = () => {state.filter = b.dataset.filter; state.selected.clear(); state.page = 1; renderData();});
   $('dataBody').addEventListener('input', e => editCell(e.target));
-  $('dataBody').addEventListener('click', e => { const button = e.target.closest('[data-admit]'), original = e.target.closest('[data-original]'); if (button) admitCustomer(button.dataset.admit); if (original) showOriginal(original.dataset.original); });
+  $('admitSelectedBtn').onclick = admitSelected;
+  $('dataBody').addEventListener('click', e => { const original = e.target.closest('[data-original]'); if (original) showOriginal(original.dataset.original); });
   $('dataBody').addEventListener('focusout', e => {
     if (!e.target.dataset.key) return;
     const record = state.records.find(r => r.id === e.target.closest('tr')?.dataset.id);
-    if (record && C.missingIdentity(record)) { record.pendingIdentity = true; state.selected.delete(record.id); }
+    if (record && C.missingIdentity(record)) { if (!record.pendingIdentity) state.selected.delete(record.id); record.pendingIdentity = true; }
     setTimeout(() => { if (!$('dataBody').contains(document.activeElement)) renderData(); }, 0);
   });
   $('dataBody').addEventListener('paste', e => { if (!e.target.dataset.key) return; e.preventDefault(); const text = e.clipboardData.getData('text/plain'); const selection = window.getSelection(); if (!selection.rangeCount) return; const range = selection.getRangeAt(0); range.deleteContents(); const node = document.createTextNode(text); range.insertNode(node); range.setStartAfter(node); range.collapse(true); selection.removeAllRanges(); selection.addRange(range); editCell(e.target); });
   $('dataBody').addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.dataset.key) {e.preventDefault(); e.target.blur();} });
   $('dataBody').addEventListener('change', e => { const id = e.target.dataset.select; if (id) { e.target.checked ? state.selected.add(id) : state.selected.delete(id); renderData(); } });
   $('selectAll').onchange = e => { filtered(duplicatesForCustomers()).slice((state.page - 1) * state.pageSize,state.page * state.pageSize).forEach(r => e.target.checked ? state.selected.add(r.id) : state.selected.delete(r.id)); renderData(); };
-  $('addRowBtn').onclick = () => { state.records.unshift({ id:uid(),...Object.fromEntries(state.fields.map(f => [f.key,''])),source:'手动新增',sourceRow:'',pendingIdentity:true,sourceCells:[] }); state.dirty = true; state.page = 1; state.filter = 'missing'; state.selected.clear(); state.query = ''; $('searchInput').value = ''; renderData(); $('dataBody').querySelector('[data-key=company]').focus(); toast('请先补齐客户名称、公司名、邮箱，再点击“加入全部客户”。'); };
+  $('addRowBtn').onclick = () => { state.records.unshift({ id:uid(),...Object.fromEntries(state.fields.map(f => [f.key,''])),source:'手动新增',sourceRow:'',pendingIdentity:true,sourceCells:[] }); state.dirty = true; state.page = 1; state.filter = 'missing'; state.selected.clear(); state.query = ''; $('searchInput').value = ''; renderData(); $('dataBody').querySelector('[data-key=company]').focus(); toast('请先补齐客户名称、公司名、邮箱，再勾选记录并点击右上角“加入全部客户”。'); };
   $('deleteBtn').onclick = () => { if (!confirm(`删除选中的 ${state.selected.size} 条客户？该操作无法撤销。`)) return; state.records = state.records.filter(r => !state.selected.has(r.id)); state.selected.clear(); state.dirty = true; renderData(); };
   $('prevPage').onclick = () => {state.page--;renderData();}; $('nextPage').onclick = () => {state.page++;renderData();};
   $('pageSize').onchange = e => { const size = Number(e.target.value); if (![10,25,50,100].includes(size)) return; state.pageSize = size; state.page = 1; renderData(); };
