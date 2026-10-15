@@ -21,7 +21,9 @@
 <div class="rules-heading"><span class="rules-icon"><svg class="ui-icon" aria-hidden="true"><use href="#icon-alert"/></svg></span><div><h3 id="reviewRulesTitle">待完善 · 判定规则</h3><p>仅检查已加入全部客户的记录；“缺少主体”不参与。</p></div></div>
 <ul class="rule-list" id="reviewRuleList"></ul>
 <ul class="rule-list">
-<li><strong>基本邮箱格式</strong><span>包含一个 @，@ 前有内容，@ 后包含点且点前后有内容；每个邮箱去除首尾空白后，内部不能含空白。开头或结尾多出的逗号、分号也会触发提示。</span></li>
+<li><strong>常见邮箱格式</strong><span>包含一个 @，前后均有内容，域名至少包含一个英文句点；邮箱内部不能含空白、连续句点，域名不能含下划线，每段不能以短横线开头或结尾。支持 name.surname+tag@example.com 等常见写法。</span></li>
+<li><strong>空项与长度</strong><span>逐项去除首尾空白；首尾或连续分隔符产生的空项也提示核对。单个邮箱最长 254 字符，@ 前最长 64 字符，域名每段最长 63 字符。</span></li>
+<li><strong>需人工核对的写法</strong><span>中文等国际化邮箱、带引号的邮箱、IP 地址形式的域名，以及“姓名 &lt;邮箱&gt;”形式暂不自动通过；保留原始内容，提示人工核对。</span></li>
 <li><strong>不触发的情况</strong><span>电话、国家 / 地区、产品需求、公司网站、备注、自定义字段为空，不会触发待完善。固定字段缺失统一归入“缺少主体”。</span></li>
 </ul><p class="rules-note">这里只检查邮箱文本格式，不验证邮箱能否收信、电话或客户真实性。同一条记录可以同时属于“待完善”和“疑似重复”。</p></section>
 <section class="classification-rules" data-rule-filter="duplicate" aria-labelledby="duplicateRulesTitle" hidden>

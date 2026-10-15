@@ -20,8 +20,20 @@
     if (missingIdentity(record)) throw Error('请先补齐固定字段：' + missingFixedFields(record).join('、') + '。');
     return { ...record, pendingIdentity: false };
   }
+  // Common unquoted ASCII mailboxes; unusual address forms remain available for manual review.
+  // A period is part of a mailbox/domain, so only the Chinese full stop is a separator.
+  const emailPattern = /^[A-Za-z0-9!#$%&'*+\/=?^_`{|}~-]+(?:\.[A-Za-z0-9!#$%&'*+\/=?^_`{|}~-]+)*@(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/;
+  function splitEmails(value) {
+    const text = clean(value);
+    return text ? text.split(/[,，;；。]|\r\n?|\n/).map(clean) : [];
+  }
+  function isValidEmail(value) {
+    const email = clean(value);
+    // Check lengths before the regex so very long imported cells are cheap to reject.
+    return email.length <= 254 && email.indexOf('@') <= 64 && emailPattern.test(email);
+  }
   const reviewRules = [
-    { label: '邮箱格式待核对', description: '邮箱非空，但不符合基本格式。多个邮箱用逗号、分号或换行分隔，每一项都需符合格式。', check: r => Boolean(clean(r.email)) && !clean(r.email).split(/[;,；，\n]+/).every(e => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e.trim())) }
+    { label: '邮箱格式待核对', description: '多个邮箱按中英文逗号（,，）、分号（;；）、中文句号（。）或换行拆分，再逐个用正则表达式校验；任意一项不通过就列为待完善。英文句点（.）保留在邮箱中。', check: r => splitEmails(r.email).some(email => !isValidEmail(email)) }
   ];
   function addField(schema, name, key) {
     const label = clean(name);
@@ -102,7 +114,7 @@
   function recoveryMatrix(records) {
     return [['来源文件 / 工作表', '原始行号', '原始列序号', '原始表头', '原始内容'], ...records.flatMap(r => (r.sourceCells || []).map(cell => [String(r.source ?? ''), String(r.sourceRow || ''), String(cell.column), cell.label, cell.value]))];
   }
-  const api = {fields, fixedKeys, addField, removeField, exportMatrix, recoveryMatrix, clean, autoMap, detectHeader, mappedRows, issues, reviewRules, missingIdentity, pendingIdentity, missingFixedFields, admitRecord, duplicateIds, csvCell};
+  const api = {fields, fixedKeys, addField, removeField, exportMatrix, recoveryMatrix, clean, autoMap, detectHeader, mappedRows, issues, reviewRules, splitEmails, isValidEmail, missingIdentity, pendingIdentity, missingFixedFields, admitRecord, duplicateIds, csvCell};
   root.TradeCore = api;
   if (typeof module !== 'undefined') module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);
