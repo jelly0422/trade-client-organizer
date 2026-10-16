@@ -2,6 +2,8 @@
 
 一个简洁的浏览器客户数据工作台：将不同格式的外贸客户表映射到统一结构，人工校对，再导出 Excel 或 CSV。
 
+2.0 使用 React、TypeScript、Vite、Ant Design 和 AG Grid Community 重构。蓝青色工作台包含客户分类卡片、可编辑资料表，以及导入映射、字段管理和原始内容侧边面板。数据处理规则与界面分离，继续在浏览器本地处理资料。
+
 ## 功能
 
 - 批量选择或拖放 XLSX、XLS、CSV、TSV、ODS，单文件上限 20 MB。
@@ -20,21 +22,27 @@
 
 ## 使用
 
-直接打开 `dist/index.html`，或安装 Node.js 后执行：
+安装 Node.js 24 或以上版本后，在项目根目录执行：
 
 ```sh
-node server.cjs
+npm ci
+npm run build
+npm start
 ```
 
-浏览器访问 http://127.0.0.1:4173 。无需安装 npm 依赖，无需后端、账号或 API Key。
+浏览器访问 http://127.0.0.1:4173 。开发时使用 `npm run dev`，访问 http://127.0.0.1:5173 。本次重构已在本地下载依赖并生成 `dist/`；现有本地目录可直接双击 `start-local.cmd` 运行，详细步骤见 [LOCAL-SETUP.md](LOCAL-SETUP.md)。
+
+构建后的网页需要通过本地 HTTP 服务访问，不能再直接双击 HTML 使用。运行时无需后端、账号、API Key 或第三方 CDN；构建与首次安装依赖需要相应工具，首次安装需要联网。
 
 1. 导入文件，选择工作表和表头行。
-2. 核对自动映射，手动调整未识别的列，点击“添加到客户列表”。多张工作表请分别添加。
+2. 在导入面板核对自动映射，手动调整未识别的列，点击“添加到客户资料库”。多张工作表请分别添加。
 3. 在“缺少主体”查看原始内容并补齐固定字段，勾选记录后点击右上角“加入全部客户”（可批量处理）；再按“待完善”“疑似重复”校对。最后导出客户表。
 
 导出包含所有保留记录，不受当前搜索、筛选或分页影响。Excel 使用“客户资料”“缺少主体”两个数据表，并在有原始内容时附带“主体补充原始内容”表（每个原始非空单元格一行）；CSV 通过“记录分类”区分，并将原始内容保存在同一行的 JSON 文本中。补充并加入全部客户后，原始内容仍保留。导出文件不是完整工作项目备份，重新导入不会自动还原分组确认状态。
 
 疑似重复仅提示，不会自动删除；同一来源的同一工作表不能重复添加。再次选择相同文件视为新来源，可能出现重复记录提示。
+
+单击单元格编辑，点击表格外保存；邮箱、产品需求和备注使用多行编辑框。选择可跨页保留，表头复选框仅选择当前页；切换分类或搜索会清空选择，避免误删隐藏记录。新增客户与文件导入均受 50,000 条上限约束。
 
 ## 客户资料库分类规则
 
@@ -78,22 +86,30 @@ node server.cjs
 
 ## 技术与验证
 
-原生 HTML / CSS / JavaScript，无构建步骤。Excel 解析使用本地内置 SheetJS CE 0.20.3（Apache-2.0）；部署后无需请求第三方 CDN。
+React 19.3.1、Ant Design 6.6.6、AG Grid Community 36.2.0、TypeScript 7.0.2、Vite 8.3.4；实际依赖由 `package-lock.json` 锁定。仅使用 AG Grid 免费社区版功能，Excel 导入和导出继续使用本地内置 SheetJS CE 0.20.3（Apache-2.0）。
+
+数据规则在 `src/domain/core.ts`，会话状态转换在 `src/state/workspace.ts`，文件处理在 `src/services/workbooks.ts`。界面按职责拆为独立组件。表格采用虚拟渲染，编辑提交后统一更新状态；分类统计随记录变化缓存，搜索或翻页不重新计算重复组。
 
 ```sh
-node --test tests/*.test.cjs
+npm test
+npm run build
 ```
 
-`dist/` 可部署到任意静态托管服务。GitHub Pages 可用仓库内的手动部署工作流：先在 Settings → Pages 中选择 GitHub Actions，再在 Actions 运行 Deploy static site。未启用 Pages 前仅上传源码不会产生公开网页。
+36 项自动化测试覆盖原有规则、Excel/CSV 数据保留，以及重构后的编辑、批量加入、字段变更和记录上限。浏览器验证使用虚构数据，不读取真实客户资料。
+
+`dist/` 是自动生成的构建产物，不再提交到 Git；源码与依赖锁文件提交到仓库。GitHub Pages 的手动工作流会安装依赖、测试、构建，再发布 `dist/`：先在 Settings → Pages 中选择 GitHub Actions，再在 Actions 运行 Deploy static site。线上 Sites 保留原项目身份和访问权限。
 
 ## 文件结构
 
 ```text
-dist/index.html       页面
-dist/styles.css       样式
-dist/core.js          映射、校验、去重与 CSV 保护逻辑
-dist/app.js           浏览器交互
-dist/vendor/          内置解析库及第三方许可证
-tests/               数据处理测试
-server.cjs           本地静态预览服务器
+src/App.tsx             工作台与操作流程
+src/components/         客户表格、导入映射、字段管理、分类规则
+src/domain/core.ts      映射、校验、去重与 CSV 保护逻辑
+src/state/workspace.ts  会话状态、分类与搜索
+src/services/           文件读取与导出
+src/styles.css          蓝青色主题与响应式布局
+public/vendor/          内置解析库及第三方许可证
+tests/                  数据规则与状态转换测试
+dist/                   构建结果（本地保留，Git 忽略）
+server.cjs              本地静态预览服务器
 ```
