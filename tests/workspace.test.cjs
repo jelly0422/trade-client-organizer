@@ -10,6 +10,48 @@ const customer = (id, extra = {}) => ({
   ...extra,
 });
 
+test("TLD failures survive import and export and clear after the offending address is corrected", () => {
+  const email = "good@example.com。bad@example.c0m";
+  const rows = [
+    ["Company", "Contact", "Email"],
+    ["Acme", "Alex", email],
+    ["No contact", "", "bad@example.123"],
+  ];
+  const records = C.mappedRows(rows, 0, C.autoMap(rows[0]), "tld.xlsx").map(
+    (record, i) => ({ ...record, id: String(i) }),
+  );
+  let state = W.reducer(W.initialWorkspace(), { type: "append", records });
+  assert.deepEqual(W.summarize(state.records).counts, {
+    all: 1,
+    review: 1,
+    duplicate: 0,
+    missing: 1,
+  });
+  const exported = C.exportMatrix(state.records);
+  assert.equal(exported[1][exported[0].indexOf("邮箱")], email);
+  assert.equal(exported[1][exported[0].indexOf("校对提示")], "邮箱格式待核对");
+  state = W.reducer(state, {
+    type: "edit",
+    id: "0",
+    key: "email",
+    value: "good@example.com。bad@example.com",
+  });
+  assert.equal(W.summarize(state.records).counts.review, 0);
+  state = W.reducer(state, {
+    type: "edit",
+    id: "1",
+    key: "contact",
+    value: "Casey",
+  });
+  state = W.reducer(state, { type: "admit", ids: ["1"] });
+  assert.deepEqual(W.summarize(state.records).counts, {
+    all: 2,
+    review: 1,
+    duplicate: 0,
+    missing: 0,
+  });
+});
+
 test("editing fixed fields preserves the explicit missing-identity admission lifecycle", () => {
   let state = W.reducer(W.initialWorkspace(), {
     type: "append",

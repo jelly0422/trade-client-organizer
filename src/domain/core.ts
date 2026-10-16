@@ -159,6 +159,21 @@ export function admitRecord<T extends CustomerRecord>(record: T): T {
 // A period is part of a mailbox/domain, so only the Chinese full stop is a separator.
 const emailPattern =
   /^[A-Za-z0-9!#$%&'*+\/=?^_`{|}~-]+(?:\.[A-Za-z0-9!#$%&'*+\/=?^_`{|}~-]+)*@(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/;
+export const emailTldDescription =
+  "每个邮箱最后一个英文句点后的顶级域名，须为 2–63 个英文字母（不区分大小写），如 .com、.cn、.technology；.co.uk 检查最后一段 uk。也支持有效的 xn-- 国际化域名编码。单字母、纯数字、普通后缀混入数字或短横线均列为待完善。";
+function hasValidEmailTld(email: string) {
+  const tld = email.slice(email.lastIndexOf(".") + 1).toLowerCase();
+  if (/^[a-z]{2,63}$/.test(tld)) return true;
+  if (!/^xn--[a-z0-9](?:[a-z0-9-]{0,57}[a-z0-9])?$/.test(tld)) return false;
+  // WHATWG URL parsing validates the IDNA encoding locally; this makes no request.
+  // Only syntax is checked, not IANA delegation, DNS, or mailbox deliverability.
+  const hostname = "email-tld-check." + tld;
+  try {
+    return new URL("https://" + hostname).hostname === hostname;
+  } catch {
+    return false;
+  }
+}
 export function splitEmails(value: unknown) {
   const text = clean(value);
   return text ? text.split(/[,，;；。]|\r\n?|\n/).map(clean) : [];
@@ -167,14 +182,17 @@ export function isValidEmail(value: unknown) {
   const email = clean(value);
   // Check lengths before the regex so very long imported cells are cheap to reject.
   return (
-    email.length <= 254 && email.indexOf("@") <= 64 && emailPattern.test(email)
+    email.length <= 254 &&
+    email.indexOf("@") <= 64 &&
+    emailPattern.test(email) &&
+    hasValidEmailTld(email)
   );
 }
 export const reviewRules: ReviewRule[] = [
   {
     label: "邮箱格式待核对",
     description:
-      "多个邮箱按中英文逗号（,，）、分号（;；）、中文句号（。）或换行拆分，再逐个用正则表达式校验；任意一项不通过就列为待完善。英文句点（.）保留在邮箱中。",
+      "多个邮箱按中英文逗号（,，）、分号（;；）、中文句号（。）或换行拆分，再逐个用正则表达式校验，并检查每个邮箱的顶级域名格式；任意一项不通过就列为待完善。英文句点（.）保留在邮箱中。",
     check: (r) => splitEmails(r.email).some((email) => !isValidEmail(email)),
   },
 ];

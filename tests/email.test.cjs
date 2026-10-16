@@ -35,6 +35,75 @@ test("common valid mailboxes retain meaningful punctuation and case", () => {
   }
 });
 
+test("TLD format accepts short and long alphabetic suffixes with exact length boundaries", () => {
+  for (const email of [
+    "sales@example.cn",
+    "sales@example.COM",
+    "sales@example.technology",
+    "sales@sub.example.co.uk",
+    "sales@company123.co.uk",
+    "sales@example." + "a".repeat(63),
+    // Format validation intentionally does not imply an IANA delegation lookup.
+    "sales@example.thisisnotaregisteredtld",
+  ]) {
+    assert.equal(C.isValidEmail(email), true, email);
+  }
+  for (const tld of [
+    "a",
+    "a".repeat(64),
+    "12",
+    "123",
+    "c0m",
+    "co9",
+    "1com",
+    "co-m",
+    "co_m",
+    "com!",
+  ]) {
+    assert.equal(C.isValidEmail("sales@example." + tld), false, tld);
+  }
+});
+
+test("internationalized TLD encodings must be valid rather than merely starting with xn--", () => {
+  for (const tld of ["xn--fiqs8s", "xn--p1ai", "XN--55QX5D"]) {
+    assert.equal(C.isValidEmail("sales@example." + tld), true, tld);
+  }
+  for (const tld of [
+    "xn--",
+    "xn--a",
+    "xn--abc",
+    "xn--0",
+    "xn--a-",
+    "xn--" + "a".repeat(60),
+  ]) {
+    assert.equal(C.isValidEmail("sales@example." + tld), false, tld);
+  }
+});
+
+test("each split address is reviewed when any position has a malformed TLD", () => {
+  for (const separator of [",", "，", ";", "；", "。", "\n", "\r", "\r\n"]) {
+    for (const invalid of [
+      "bad@example.c",
+      "bad@example.123",
+      "bad@example.c0m",
+      "bad@example.co-m",
+      "bad@example.xn--abc",
+    ]) {
+      for (const emails of [
+        [invalid, "good@example.com", "last@example.co.uk"],
+        ["good@example.com", invalid, "last@example.co.uk"],
+        ["good@example.com", "last@example.co.uk", invalid],
+      ]) {
+        assert.deepEqual(
+          C.issues({ email: emails.join(separator) }),
+          ["邮箱格式待核对"],
+          emails.join(separator),
+        );
+      }
+    }
+  }
+});
+
 test("malformed addresses are reviewed in any position of a multi-email cell", () => {
   const invalid = [
     "sales@example..com",

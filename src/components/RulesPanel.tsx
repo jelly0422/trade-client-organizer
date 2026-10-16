@@ -1,6 +1,6 @@
 import { InfoCircleOutlined } from "@ant-design/icons";
 import type { Category } from "../state/workspace";
-import { reviewRules } from "../domain/core";
+import { emailTldDescription, reviewRules } from "../domain/core";
 
 const rules = {
   review: {
@@ -8,16 +8,17 @@ const rules = {
     intro: "检查已加入全部客户的记录；缺少主体不参与。",
     items: [
       ["逐个检查邮箱", reviewRules[0].description],
+      ["顶级域名", emailTldDescription],
       [
         "格式与长度",
         "包含一个 @，域名至少含一个英文句点；不能含内部空白、连续句点或域名下划线，域名每段不能以短横线开头或结尾。单个邮箱最长 254 字符，@ 前最长 64 字符，域名每段最长 63 字符；分隔后出现空项也提示核对。",
       ],
       [
         "人工核对范围",
-        "中文等国际化邮箱、带引号的邮箱、IP 域名和“姓名 <邮箱>”写法暂不自动通过；原始文本保留。电话、地区、产品需求、网站、备注和自定义字段为空不触发。",
+        "直接使用中文等非 ASCII 字符的邮箱、带引号的邮箱、IP 域名和“姓名 <邮箱>”写法暂不自动通过；原始文本保留。电话、地区、产品需求、网站、备注和自定义字段为空不触发。",
       ],
     ],
-    note: "仅校验文本格式，不验证能否收信或客户真实性；同一条记录可同时属于疑似重复。",
+    note: "仅校验文本格式，不核对顶级域名是否已获 IANA 委派、域名是否注册或邮箱能否收信；同一条记录可同时属于疑似重复。",
   },
   duplicate: {
     title: "疑似重复",

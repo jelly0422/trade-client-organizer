@@ -1254,6 +1254,11 @@ h2 {
 .ant-pagination .ant-select {
   min-width: 90px;
 }
+@media (min-width: 951px) {
+  .rules-review .rules-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
 @media (min-width: 1600px) {
   .hero-banner {
     min-height: 260px;
