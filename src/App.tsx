@@ -16,6 +16,7 @@ import {
   CloudUploadOutlined,
   CopyOutlined,
   DatabaseOutlined,
+  DownOutlined,
   DownloadOutlined,
   FileExcelOutlined,
   GlobalOutlined,
@@ -81,6 +82,7 @@ const categories = [
 ];
 export default function App() {
   const { message, modal } = AntApp.useApp();
+  const [libraryNavOpen, setLibraryNavOpen] = useState(true);
   const [workspace, dispatch] = useReducer(
     reducer,
     undefined,
@@ -276,29 +278,59 @@ export default function App() {
         </a>
         <span className="nav-label">工作空间</span>
         <nav aria-label="主导航">
-          <button
-            className="nav-item active"
-            onClick={() =>
-              document
-                .getElementById("customer-library")
-                ?.scrollIntoView({ behavior: "smooth" })
-            }
-          >
-            <DatabaseOutlined />
-            客户资料库
-            <span className="nav-dot" />
-          </button>
-          <button className="nav-item" onClick={() => setImportOpen(true)}>
-            <CloudUploadOutlined />
-            导入与映射
-            {sources.length > 0 && (
-              <span className="nav-count">{sources.length}</span>
-            )}
-          </button>
-          <button className="nav-item" onClick={() => setFieldsOpen(true)}>
-            <SettingOutlined />
-            字段设置
-          </button>
+          <ul className="nav-list">
+            <li>
+              <button
+                className="nav-item active nav-parent"
+                aria-label="客户资料库"
+                title="客户资料库"
+                aria-expanded={libraryNavOpen}
+                aria-controls="customer-library-submenu"
+                onClick={() => {
+                  setLibraryNavOpen(open => !open);
+                  document
+                    .getElementById("customer-library")
+                    ?.scrollIntoView({ behavior: "smooth" });
+                }}
+              >
+                <DatabaseOutlined />
+                客户资料库
+                <DownOutlined className="nav-chevron" />
+              </button>
+              <ul
+                id="customer-library-submenu"
+                className="nav-submenu"
+                aria-label="客户资料库子菜单"
+                hidden={!libraryNavOpen}
+              >
+                <li>
+                  <button
+                    className={`nav-item nav-subitem${importOpen ? " active" : ""}`}
+                    aria-label="导入与映射"
+                    title="导入与映射"
+                    onClick={() => setImportOpen(true)}
+                  >
+                    <CloudUploadOutlined />
+                    导入与映射
+                    {sources.length > 0 && (
+                      <span className="nav-count">{sources.length}</span>
+                    )}
+                  </button>
+                </li>
+                <li>
+                  <button
+                    className={`nav-item nav-subitem${fieldsOpen ? " active" : ""}`}
+                    aria-label="字段设置"
+                    title="字段设置"
+                    onClick={() => setFieldsOpen(true)}
+                  >
+                    <SettingOutlined />
+                    字段设置
+                  </button>
+                </li>
+              </ul>
+            </li>
+          </ul>
         </nav>
         <div className="sidebar-bottom">
           <div className="privacy-card">

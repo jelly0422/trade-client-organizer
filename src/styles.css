@@ -135,12 +135,34 @@ h2 {
   background: #edf8fb;
   color: #0786a8;
 }
-.nav-dot {
-  width: 6px;
-  height: 6px;
-  background: #02a2be;
-  border-radius: 50%;
+.nav-list,
+.nav-submenu {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.nav-parent > .nav-chevron {
   margin-left: auto;
+  font-size: 11px;
+  color: #2e9ab3;
+  transition: transform 0.18s;
+}
+.nav-parent[aria-expanded="false"] > .nav-chevron {
+  transform: rotate(-90deg);
+}
+.nav-submenu {
+  margin: 2px 0 12px 24px;
+  padding-left: 12px;
+  border-left: 1px solid #dcecf2;
+}
+.nav-subitem {
+  gap: 9px;
+  padding: 11px 10px;
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+.nav-subitem > .anticon {
+  font-size: 15px;
 }
 .nav-count {
   margin-left: auto;
@@ -1339,10 +1361,20 @@ h2 {
   .nav-item > .anticon {
     font-size: 20px;
   }
-  .nav-dot,
+  .nav-parent > .nav-chevron,
   .nav-count,
   .sidebar-bottom .nav-item > .anticon:last-child {
     display: none;
+  }
+  .nav-submenu {
+    margin-left: 9px;
+    padding-left: 5px;
+  }
+  .nav-subitem {
+    padding: 11px 5px;
+  }
+  .nav-subitem > .anticon {
+    font-size: 17px;
   }
   .main-workspace {
     margin-left: 76px;
