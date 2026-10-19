@@ -93,7 +93,7 @@ export function FieldsDrawer({
         ))}
       </div>
       <p className="muted-note">
-        客户名称、公司名和邮箱不可删除。字段设置仅在当前页面会话内有效，刷新前请导出。
+        客户名称、公司名和邮箱不可删除。字段配置随整理进度自动保存到当前浏览器。
       </p>
     </Drawer>
   );

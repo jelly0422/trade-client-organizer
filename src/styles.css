@@ -1659,3 +1659,9 @@ h2 {
     animation: none !important;
   }
 }
+.workspace-loading { min-height: 75vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px; padding: 24px; color: #607588; }
+.save-warning { margin-bottom: 18px; }
+.original-fill-toolbar { padding: 14px; margin-bottom: 20px; background: #eff9fc; border: 1px solid #d5edf4; border-radius: 10px; }
+.original-fill-toolbar .ant-select { width: 100%; }
+.original-fill-toolbar p { margin: 10px 0 0; color: #607588; font-size: 12px; }
+.original-content p { overflow-wrap: anywhere; }

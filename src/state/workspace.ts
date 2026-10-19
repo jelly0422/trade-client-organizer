@@ -7,22 +7,27 @@ export interface Workspace {
   fields: Field[];
   records: Customer[];
   dirty: boolean;
+  deleted: { record: Customer; index: number }[];
 }
 export const initialWorkspace = (): Workspace => ({
   fields: C.fields.map((f) => ({ ...f })),
   records: [],
   dirty: false,
+  deleted: [],
 });
 export type Action =
+  | { type: "restore"; workspace: Workspace }
   | { type: "append"; records: Customer[] }
   | { type: "edit"; id: string; key: string; value: string }
   | { type: "delete"; ids: string[] }
+  | { type: "undoDelete" }
   | { type: "admit"; ids: string[] }
   | { type: "addField"; name: string; key: string }
   | { type: "removeField"; key: string }
   | { type: "exported" };
 
 export function reducer(state: Workspace, action: Action): Workspace {
+  if (action.type === "restore") return action.workspace;
   if (action.type === "exported") return { ...state, dirty: false };
   if (action.type === "append") {
     if (state.records.length + action.records.length > MAX_RECORDS)
@@ -52,11 +57,33 @@ export function reducer(state: Workspace, action: Action): Workspace {
   }
   if (action.type === "delete") {
     const ids = new Set(action.ids);
+    const deleted = state.records.flatMap((record, index) =>
+      ids.has(record.id) ? [{ record, index }] : [],
+    );
+    if (!deleted.length) return state;
     return {
       ...state,
       dirty: true,
       records: state.records.filter((r) => !ids.has(r.id)),
+      deleted,
     };
+  }
+  if (action.type === "undoDelete") {
+    const existing = new Set(state.records.map(r => r.id));
+    const deleted = state.deleted.filter(({ record }) => !existing.has(record.id));
+    if (state.records.length + deleted.length > MAX_RECORDS)
+      throw Error("恢复后将超过 50,000 条上限，请先减少当前记录再撤销。");
+    const records = [...state.records];
+    for (const { record, index } of deleted) {
+      // Restore only fields still present in the current schema, preserving provenance.
+      const restored: Customer = {
+        id: record.id, source: record.source, sourceRow: record.sourceRow,
+        sourceCells: record.sourceCells, pendingIdentity: record.pendingIdentity,
+        ...Object.fromEntries(state.fields.map(f => [f.key, record[f.key] ?? ""])),
+      };
+      records.splice(Math.min(index, records.length), 0, restored);
+    }
+    return { ...state, records, deleted: [], dirty: true };
   }
   if (action.type === "admit") {
     const ids = new Set(action.ids);
@@ -91,6 +118,12 @@ export function reducer(state: Workspace, action: Action): Workspace {
       return next;
     }),
   };
+}
+
+// Keep selections across pages, but never across a change in category/search membership.
+export function visibleSelection(selected: Set<string>, filtered: Customer[]) {
+  const allowed = new Set(filtered.map(record => record.id));
+  return new Set([...selected].filter(id => allowed.has(id)));
 }
 
 export function summarize(records: Customer[]) {

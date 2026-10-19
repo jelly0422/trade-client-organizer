@@ -44,7 +44,7 @@ test("duplicate detection includes both originals without matching blank identit
     [
       ...C.duplicateIds([
         { id: "1", email: "A@B.com" },
-        { id: "2", email: "a@b.com" },
+        { id: "2", email: "A@b.com" },
         { id: "3" },
         { id: "4" },
       ]),

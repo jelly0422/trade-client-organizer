@@ -298,6 +298,6 @@ export function exportCustomers(
   if (!template && pending.length)
     append(C.exportMatrix(pending, fields), "缺少主体");
   const raw = C.recoveryMatrix(template ? [] : records);
-  if (raw.length > 1) append(raw, "主体补充原始内容");
+  if (raw.length > 1) append(raw, "导入原始内容");
   xlsx().writeFile(book, name + ".xlsx");
 }

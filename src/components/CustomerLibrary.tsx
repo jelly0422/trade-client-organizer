@@ -19,6 +19,7 @@ import {
   SearchOutlined,
   SettingOutlined,
   WarningOutlined,
+  UndoOutlined,
 } from "@ant-design/icons";
 import { AgGridReact } from "ag-grid-react";
 import {
@@ -65,6 +66,8 @@ interface Props {
   onEdit: (id: string, key: string, value: string) => void;
   onAdd: () => void;
   onDelete: () => void;
+  deletedCount: number;
+  onUndoDelete: () => void;
   onAdmit: () => void;
   onImport: () => void;
   onDemo: () => void;
@@ -334,12 +337,15 @@ export function CustomerLibrary(p: Props) {
               onClick={p.onFields}
             />
           </Tooltip>
+          {!!p.deletedCount && <Button icon={<UndoOutlined />} onClick={p.onUndoDelete}>
+            撤销上次删除 ({p.deletedCount})
+          </Button>}
         </div>
       </div>
       <div className="table-context">
         <span>
           {p.selected.size
-            ? `已选择 ${p.selected.size} 条 · 切换分类或搜索将清空选择`
+            ? `已选择 ${p.selected.size} 条 · 跨页保留；记录移出筛选结果时自动取消勾选`
             : "单击单元格编辑，点击表格外保存。固定字段缺失时会单独保留。"}
         </span>
         {p.category === "missing" && (

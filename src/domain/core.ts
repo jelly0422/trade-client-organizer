@@ -167,9 +167,11 @@ function hasValidEmailTld(email: string) {
   if (!/^xn--[a-z0-9](?:[a-z0-9-]{0,57}[a-z0-9])?$/.test(tld)) return false;
   // WHATWG URL parsing validates the IDNA encoding locally; this makes no request.
   // Only syntax is checked, not IANA delegation, DNS, or mailbox deliverability.
-  const hostname = "email-tld-check." + tld;
+  // A fixed Unicode label forces the IDNA conversion path even in runtimes
+  // that fast-path all-ASCII hostnames without validating existing A-labels.
+  const hostname = "é.email-tld-check." + tld;
   try {
-    return new URL("https://" + hostname).hostname === hostname;
+    return new URL("https://" + hostname).hostname === "xn--9ca.email-tld-check." + tld;
   } catch {
     return false;
   }
@@ -291,8 +293,7 @@ export function mappedRows(
       ]),
     );
     const pending = missingIdentity(record);
-    const sourceCells = pending
-      ? row
+    const sourceCells = row
           .map((value, column) => ({
             column: columnOffset + column + 1,
             label:
@@ -300,8 +301,7 @@ export function mappedRows(
               `第 ${columnOffset + column + 1} 列`,
             value: String(value ?? ""),
           }))
-          .filter((cell) => clean(cell.value))
-      : [];
+          .filter((cell) => clean(cell.value));
     return [
       {
         ...record,
@@ -322,17 +322,19 @@ export function duplicateIds(records: CustomerRecord[]) {
   const groups = new Map<string, string | undefined>(),
     ids = new Set<string | undefined>();
   records.forEach((r) => {
-    const email = normalize(r.email);
-    const key = email
-      ? "email:" + email
-      : normalize(r.company) && normalize(r.contact)
-        ? "name:" + normalize(r.company) + "|" + normalize(r.contact)
-        : "";
-    if (!key) return;
-    if (groups.has(key)) {
-      ids.add(groups.get(key));
-      ids.add(r.id);
-    } else groups.set(key, r.id);
+    // Compare individual valid addresses. Preserve punctuation and local-part case:
+    // only domain names are case-insensitive. Repeating an address inside one row
+    // does not make that row a duplicate of itself.
+    const keys = new Set(splitEmails(r.email).filter(isValidEmail).map((email) => {
+      const at = email.lastIndexOf("@");
+      return email.slice(0, at) + "@" + email.slice(at + 1).toLowerCase();
+    }));
+    for (const key of keys) {
+      if (groups.has(key)) {
+        ids.add(groups.get(key));
+        ids.add(r.id);
+      } else groups.set(key, r.id);
+    }
   });
   return ids;
 }

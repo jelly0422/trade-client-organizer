@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useMemo, useReducer, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Alert,
   App as AntApp,
   Button,
   Drawer,
   Modal,
+  Select,
+  Spin,
   Tag,
   Tooltip,
 } from "antd";
@@ -33,12 +35,12 @@ import type { Customer } from "./domain/core";
 import { CustomerLibrary } from "./components/CustomerLibrary";
 import { ImportDrawer } from "./components/ImportDrawer";
 import { FieldsDrawer } from "./components/FieldsDrawer";
+import { useLocalWorkspace } from "./hooks/useLocalWorkspace";
 import {
-  initialWorkspace,
-  reducer,
   summarize,
   filterRecords,
   MAX_RECORDS,
+  visibleSelection,
   type Category,
 } from "./state/workspace";
 import {
@@ -83,11 +85,7 @@ const categories = [
 export default function App() {
   const { message, modal } = AntApp.useApp();
   const [libraryNavOpen, setLibraryNavOpen] = useState(true);
-  const [workspace, dispatch] = useReducer(
-    reducer,
-    undefined,
-    initialWorkspace,
-  );
+  const { workspace, dispatch, ready, loadError, saveState, retrySave } = useLocalWorkspace();
   const [sources, setSources] = useState<FileSource[]>([]),
     [current, setCurrent] = useState("");
   const [imported, setImported] = useState(new Set<string>()),
@@ -102,6 +100,7 @@ export default function App() {
     [selected, setSelected] = useState(new Set<string>());
   const [original, setOriginal] = useState<Customer | null>(null),
     [format, setFormat] = useState<"xlsx" | "csv">("xlsx");
+  const [originalTarget, setOriginalTarget] = useState<string>();
   const summary = useMemo(
     () => summarize(workspace.records),
     [workspace.records],
@@ -120,16 +119,13 @@ export default function App() {
   useEffect(() => {
     setSources((previous) => synchronizeSchema(previous, workspace.fields));
   }, [workspace.fields]);
+  const activeSelection = useMemo(() => visibleSelection(selected, filtered), [selected, filtered]);
   useEffect(() => {
-    const onLeave = (event: BeforeUnloadEvent) => {
-      if (workspace.dirty && workspace.records.length) {
-        event.preventDefault();
-        event.returnValue = "";
-      }
-    };
-    window.addEventListener("beforeunload", onLeave);
-    return () => window.removeEventListener("beforeunload", onLeave);
-  }, [workspace.dirty, workspace.records.length]);
+    setSelected(previous => {
+      const next = visibleSelection(previous, filtered);
+      return next.size === previous.size ? previous : next;
+    });
+  }, [filtered]);
   const changeCategory = (value: Category) => {
     setCategory(value);
     setPage(1);
@@ -225,22 +221,22 @@ export default function App() {
   }, []);
   const onDelete = () =>
     modal.confirm({
-      title: `删除选中的 ${selected.size} 条客户？`,
-      content: "删除后无法撤销，请确认已经保留需要的资料。",
+      title: `删除选中的 ${activeSelection.size} 条客户？`,
+      content: "删除后可点击“撤销上次删除”恢复本次记录；再次删除会替换上一次的撤销记录。",
       okText: "删除客户",
       cancelText: "取消",
       okButtonProps: { danger: true },
       onOk: () => {
-        dispatch({ type: "delete", ids: [...selected] });
+        dispatch({ type: "delete", ids: [...activeSelection] });
         setSelected(new Set());
-        message.success("已删除所选客户。");
+        message.success("已删除所选客户，可撤销上次删除。");
       },
     });
   const onAdmit = () => {
     const ready = workspace.records
       .filter(
         (r) =>
-          selected.has(r.id) && C.pendingIdentity(r) && !C.missingIdentity(r),
+          activeSelection.has(r.id) && C.pendingIdentity(r) && !C.missingIdentity(r),
       )
       .map((r) => r.id);
     if (!ready.length) return;
@@ -265,6 +261,36 @@ export default function App() {
       message.error("导出失败，请检查过长单元格，或尝试 CSV 格式。");
     }
   };
+  const onUndoDelete = () => {
+    if (workspace.records.length + workspace.deleted.length > MAX_RECORDS) {
+      message.warning("恢复后将超过 50,000 条上限，请先减少当前记录。");
+      return;
+    }
+    dispatch({ type: "undoDelete" });
+    setQuery("");
+    changeCategory(workspace.deleted.every(({ record }) => C.pendingIdentity(record)) ? "missing" : "all");
+    message.success(`已恢复 ${workspace.deleted.length} 条客户及其原始内容。`);
+  };
+  const onFillOriginal = (value: string) => {
+    const record = workspace.records.find(r => r.id === original?.id);
+    const field = workspace.fields.find(f => f.key === originalTarget);
+    if (!record || !field) return;
+    const apply = () => {
+      onEdit(record.id, field.key, value);
+      message.success(`已填入“${field.label}”。`);
+    };
+    if (C.clean(record[field.key]) && C.clean(record[field.key]) !== C.clean(value))
+      modal.confirm({ title: `覆盖“${field.label}”中的已有内容？`, content: `当前内容：${C.clean(record[field.key])}`,
+        okText: "确认填入", cancelText: "取消", onOk: apply });
+    else apply();
+  };
+  if (!ready) return (
+    <div className="workspace-loading">
+      {loadError ? <Alert type="error" showIcon title="暂时无法恢复本地进度" description={loadError}
+        action={<Button onClick={() => window.location.reload()}>重新读取</Button>} /> :
+        <><Spin size="large" /><p>正在恢复本地整理进度…</p></>}
+    </div>
+  );
   return (
     <div className="workspace-shell">
       <aside className="sidebar">
@@ -339,7 +365,7 @@ export default function App() {
             <p>
               文件仅在本地处理。
               <br />
-              整理完成后，记得导出保存。
+              进度自动保存在此浏览器。
             </p>
             <span>
               <i />
@@ -441,20 +467,23 @@ export default function App() {
               <ApartmentOutlined />
               你的客户工作台
             </span>
-            <span>
-              {workspace.dirty ? (
+            <span role="status" data-testid="local-save-status">
+              {saveState.status !== "saved" ? (
                 <>
                   <span className="unsaved-dot" />
-                  有未导出的修改
+                  {saveState.status === "saving" ? "正在保存到本地…" : "本地进度尚未保存"}
                 </>
               ) : (
                 <>
                   <CheckCircleOutlined />{" "}
-                  {workspace.records.length ? "已生成导出文件" : "准备开始整理"}
+                  {saveState.savedAt ? `已保存到本地 · ${new Date(saveState.savedAt).toLocaleTimeString("zh-CN")}` : "本地自动保存已开启"}
                 </>
               )}
             </span>
           </div>
+          {(saveState.status === "error" || saveState.status === "conflict") && <Alert
+            className="save-warning" type="warning" showIcon title={saveState.error}
+            action={saveState.status === "error" ? <Button onClick={retrySave}>重试保存</Button> : undefined} />}
           <div className="category-grid" role="group" aria-label="客户分类">
             {categories.map((item) => (
               <button
@@ -514,16 +543,18 @@ export default function App() {
               setPage(size !== pageSize ? 1 : next);
               setPageSize(size);
             }}
-            selected={selected}
+            selected={activeSelection}
             onSelected={setSelected}
             onEdit={onEdit}
             onAdd={onAdd}
             onDelete={onDelete}
+            deletedCount={workspace.deleted.length}
+            onUndoDelete={onUndoDelete}
             onAdmit={onAdmit}
             onImport={() => setImportOpen(true)}
             onDemo={onDemo}
             onFields={() => setFieldsOpen(true)}
-            onOriginal={setOriginal}
+            onOriginal={(record) => { setOriginal(record); setOriginalTarget(undefined); }}
             format={format}
             onFormat={setFormat}
             onExport={() => onExport()}
@@ -532,7 +563,7 @@ export default function App() {
             <span>外贸客户信息整理工具</span>
             <span>
               <LockOutlined />
-              刷新或关闭页面前，请导出资料
+              本地自动保存 · 仅限当前设备、浏览器与网址
             </span>
           </footer>
         </div>
@@ -606,6 +637,11 @@ export default function App() {
           {original?.source}
           {original?.sourceRow ? ` · 第 ${original.sourceRow} 行` : ""}
         </p>
+        <div className="original-fill-toolbar">
+          <Select aria-label="原始内容目标字段" placeholder="选择要补充的字段" value={originalTarget}
+            onChange={setOriginalTarget} options={workspace.fields.map(f => ({ value: f.key, label: f.label }))} />
+          <p>选择字段后，可填入任意原始值；覆盖已有内容前会先确认。</p>
+        </div>
         <div className="original-content">
           {original?.sourceCells?.map((cell) => (
             <div key={cell.column}>
@@ -614,6 +650,7 @@ export default function App() {
                 <span>第 {cell.column} 列</span>
               </label>
               <p>{cell.value}</p>
+              <Button size="small" disabled={!originalTarget} onClick={() => onFillOriginal(cell.value)}>填入所选字段</Button>
             </div>
           ))}
         </div>
@@ -658,7 +695,7 @@ export default function App() {
               <p>
                 导出不受搜索和分页影响。Excel
                 分表保存客户、缺少主体和原始内容；CSV
-                保留分类与原始内容。数据与字段设置仅在本次会话有效，导出文件不能完整恢复工作项目状态。
+                保留分类与原始内容。客户、字段配置、确认状态与最近一次删除记录会自动保存到当前浏览器，刷新后可继续整理。
               </p>
             </section>
           </div>
@@ -666,7 +703,7 @@ export default function App() {
         <Alert
           type="info"
           showIcon
-          title="文件在浏览器内处理，刷新或关闭前请导出。"
+          title="本地保存仅限当前设备、浏览器与网址，不跨设备同步。清理网站数据或结束无痕会话可能移除进度。尚未加入资料库的导入文件需重新选择。"
         />
       </Modal>
     </div>
