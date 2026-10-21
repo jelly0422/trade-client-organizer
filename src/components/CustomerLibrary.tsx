@@ -37,18 +37,18 @@ import { RulesPanel } from "./RulesPanel";
 ModuleRegistry.registerModules([AllCommunityModule]);
 const gridTheme = themeQuartz.withParams({
   accentColor: "#0588ad",
-  backgroundColor: "#ffffff",
-  foregroundColor: "#253c51",
-  borderColor: "#e5eef3",
-  headerBackgroundColor: "#f5f9fb",
-  headerTextColor: "#607588",
+  backgroundColor: "transparent",
+  foregroundColor: "#24485d",
+  borderColor: "rgba(140,178,195,.22)",
+  headerBackgroundColor: "rgba(229,241,245,.72)",
+  headerTextColor: "#4b687a",
   fontFamily: 'Inter, "Segoe UI", "Microsoft YaHei", sans-serif',
   fontSize: 13,
-  rowHeight: 58,
+  rowHeight: 64,
   headerHeight: 46,
   wrapperBorderRadius: 0,
-  oddRowBackgroundColor: "#fbfdfe",
-  selectedRowBackgroundColor: "#e5f7fb",
+  oddRowBackgroundColor: "rgba(255,255,255,.16)",
+  selectedRowBackgroundColor: "rgba(204,236,244,.85)",
 });
 interface Props {
   fields: Field[];
@@ -151,7 +151,7 @@ export function CustomerLibrary(p: Props) {
         headerName: "资料状态",
         width: compact ? 130 : 158,
         minWidth: 125,
-        pinned: compact ? undefined : "left",
+        pinned: compact ? undefined : "right",
         editable: false,
         cellRenderer: ({ data }: ICellRendererParams<Customer>) => {
           if (!data) return null;
@@ -268,11 +268,10 @@ export function CustomerLibrary(p: Props) {
     <section className="library-panel" id="customer-library">
       <div className="library-heading">
         <div>
-          <span className="eyebrow">CUSTOMER LIBRARY</span>
           <h2>
-            客户资料库{" "}
+            {{ all: "全部客户", review: "待完善", duplicate: "疑似重复", missing: "缺少主体" }[p.category]}{" "}
             <span className="count-chip">
-              {p.records.length.toLocaleString()} 条记录
+              {p.filtered.length.toLocaleString()} 条
             </span>
           </h2>
         </div>
@@ -287,7 +286,6 @@ export function CustomerLibrary(p: Props) {
             ]}
           />
           <Button
-            type="primary"
             icon={<DownloadOutlined />}
             disabled={!p.records.length}
             onClick={p.onExport}
@@ -337,6 +335,9 @@ export function CustomerLibrary(p: Props) {
               onClick={p.onFields}
             />
           </Tooltip>
+          <Button type="primary" icon={<CloudUploadOutlined />} onClick={p.onImport}>
+            导入客户
+          </Button>
           {!!p.deletedCount && <Button icon={<UndoOutlined />} onClick={p.onUndoDelete}>
             撤销上次删除 ({p.deletedCount})
           </Button>}

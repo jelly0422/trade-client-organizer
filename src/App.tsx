@@ -20,7 +20,6 @@ import {
   DatabaseOutlined,
   DownOutlined,
   DownloadOutlined,
-  FileExcelOutlined,
   GlobalOutlined,
   InfoCircleOutlined,
   LockOutlined,
@@ -36,6 +35,7 @@ import { CustomerLibrary } from "./components/CustomerLibrary";
 import { ImportDrawer } from "./components/ImportDrawer";
 import { FieldsDrawer } from "./components/FieldsDrawer";
 import { useLocalWorkspace } from "./hooks/useLocalWorkspace";
+import { useGlassPointer } from "./hooks/useGlassPointer";
 import {
   summarize,
   filterRecords,
@@ -83,6 +83,7 @@ const categories = [
   },
 ];
 export default function App() {
+  useGlassPointer();
   const { message, modal } = AntApp.useApp();
   const [libraryNavOpen, setLibraryNavOpen] = useState(true);
   const { workspace, dispatch, ready, loadError, saveState, retrySave } = useLocalWorkspace();
@@ -293,13 +294,19 @@ export default function App() {
   );
   return (
     <div className="workspace-shell">
+      <div className="workspace-landscape" aria-hidden="true">
+        <div className="landscape-ring landscape-ring-one" />
+        <div className="landscape-ring landscape-ring-two" />
+        <div className="landscape-ring landscape-ring-three" />
+        <div className="landscape-mist" />
+      </div>
       <aside className="sidebar">
         <a className="brand" href="#customer-library">
           <span className="brand-mark">
             <GlobalOutlined />
           </span>
           <span>
-            客户整理工作台<small>TRADE CLIENT STUDIO</small>
+            外贸客户工具<small>CLIENT WORKSPACE</small>
           </span>
         </a>
         <span className="nav-label">工作空间</span>
@@ -385,9 +392,12 @@ export default function App() {
           <div className="breadcrumb">
             <span>工作空间</span>
             <span>/</span>
-            <b>客户资料整理</b>
+            <b>客户资料库</b>
           </div>
           <div className="topbar-right">
+            <Button className="template-button" icon={<DownloadOutlined />} onClick={() => onExport(true)}>
+              下载标准模板
+            </Button>
             <span className="local-badge">
               <span />
               浏览器本地处理
@@ -400,7 +410,6 @@ export default function App() {
                 onClick={() => setHelpOpen(true)}
               />
             </Tooltip>
-            <span className="workspace-avatar">外贸</span>
           </div>
         </header>
         <div className="page-content">
@@ -408,64 +417,23 @@ export default function App() {
             <div className="hero-copy">
               <span className="hero-eyebrow">
                 <span />
-                从一份名单，到清晰的客户资料
+                A CLEARER VIEW OF YOUR CLIENTS
               </span>
               <h1>外贸客户信息整理工具</h1>
-              <p>统一不同格式的表格，让映射、校对与客户管理井然有序。</p>
-              <div className="hero-actions">
-                <Button
-                  type="primary"
-                  size="large"
-                  icon={<CloudUploadOutlined />}
-                  onClick={() => setImportOpen(true)}
-                >
-                  导入客户表
-                </Button>
-                <Button
-                  size="large"
-                  icon={<DownloadOutlined />}
-                  onClick={() => onExport(true)}
-                >
-                  下载标准模板
-                </Button>
-              </div>
+              <p>归集每一份资料，让下一次合作更清晰。</p>
             </div>
-            <div className="hero-visual" aria-hidden="true">
-              <div className="visual-orbit" />
-              <div className="visual-file">
-                <FileExcelOutlined />
-                <span>多种格式</span>
-                <small>XLSX / CSV / ODS</small>
+            <div className="glass-hero-art" aria-hidden="true">
+              <div className="glass-sheet" />
+              <div className="glass-sheet glass-sheet-front">
+                {[1, 2, 3, 4, 5, 6].map(i => <i key={i} />)}
               </div>
-              <ArrowRightOutlined className="visual-arrow" />
-              <div className="visual-table">
-                <div>
-                  <span />
-                  <span />
-                  <span />
-                  <b>统一客户资料</b>
-                </div>
-                <section>
-                  {[1, 2, 3].map((i) => (
-                    <p key={i}>
-                      <i />
-                      <span />
-                      <span />
-                      <CheckCircleOutlined />
-                    </p>
-                  ))}
-                </section>
-                <footer>
-                  <CheckCircleOutlined />
-                  整齐，有据可查
-                </footer>
-              </div>
+              <div className="glass-sheet-check"><CheckCircleOutlined /></div>
             </div>
           </section>
           <div className="workspace-overline">
             <span>
               <ApartmentOutlined />
-              你的客户工作台
+              客户概览
             </span>
             <span role="status" data-testid="local-save-status">
               {saveState.status !== "saved" ? (
@@ -494,8 +462,8 @@ export default function App() {
                 onClick={() => changeCategory(item.key)}
               >
                 <div className="category-top">
+                  <span className="category-label">{item.label}</span>
                   <span className="category-icon">{item.icon}</span>
-                  <ArrowRightOutlined />
                 </div>
                 <div
                   className="category-number"
@@ -503,8 +471,7 @@ export default function App() {
                 >
                   {summary.counts[item.key].toLocaleString()}
                 </div>
-                <div className="category-label">{item.label}</div>
-                <div className="category-note">{item.note}</div>
+                <div className="category-note"><span>{item.note}</span><ArrowRightOutlined /></div>
               </button>
             ))}
           </div>
