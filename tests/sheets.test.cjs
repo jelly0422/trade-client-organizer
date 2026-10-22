@@ -204,3 +204,137 @@ test('XLSX, XLS and ODS input retains multiple worksheet names through file pars
     assert.equal(batch.records.length, 3);
   }
 });
+
+test('deleting a sheet removes all its records and original export content, without deleting same-named sheets', () => {
+  let state = append(importSeparate('file-a'));
+  state = W.reducer(state, { type: 'append', ...importSeparate('file-b') });
+  state = { ...state, records: state.records.map((r, i) => i ? r : {
+    ...r, sourceCells: [...r.sourceCells, { column: 6, label: 'Private note', value: 'only-in-deleted-sheet' }],
+  }) };
+  const before = state;
+  const target = state.sheets[0];
+  state = W.reducer(state, { type: 'deleteSheet', id: target.id });
+  assert.equal(state.records.length, 4);
+  assert.equal(state.deleted.length, 2); // Includes the pending identity record.
+  assert.equal(state.sheets.length, 5);
+  assert.ok(state.sheets.some(s => s.name === target.name && s.id !== target.id));
+  assert.ok(state.records.every(r => r.sheetId !== target.id));
+  assert.deepEqual(state.deletedSheet, { sheet: target, index: 0 });
+  const book = roundTrip(B.buildCustomerWorkbook(state.records, state.fields, false, state.sheets));
+  assert.deepEqual(book.SheetNames, ['亚洲客户', '空表', '欧洲客户', '亚洲客户 (2)', '空表 (2)', '导入原始内容']);
+  assert.ok(rows(book, '导入原始内容').every(row => !row.includes('only-in-deleted-sheet')));
+  assert.equal(rows(book, '导入原始内容').length, 1 + state.records.reduce((n, r) => n + r.sourceCells.length, 0));
+  assert.equal(rows(book, '欧洲客户').length, 3);
+  assert.equal(W.summarize(state.records).counts.missing, 1);
+  state = W.reducer(state, { type: 'undoDelete' });
+  assert.deepEqual(state.sheets, before.sheets);
+  assert.deepEqual(state.records, before.records);
+  assert.equal(state.deletedSheet, null);
+});
+
+test('an empty sheet can be deleted, persisted and restored in its original position', async () => {
+  let state = append(importSeparate());
+  const before = state;
+  state = W.reducer(state, { type: 'deleteSheet', id: state.sheets[2].id });
+  assert.equal(state.deleted.length, 0);
+  assert.equal(state.deletedSheet.sheet.name, '空表');
+  const factory = new IDBFactory();
+  await L.writeLocalWorkspace(state, null, factory);
+  state = (await L.readLocalWorkspace(factory)).workspace;
+  assert.ok(!B.buildCustomerWorkbook(state.records, state.fields, false, state.sheets).SheetNames.includes('空表'));
+  state = W.reducer(state, { type: 'undoDelete' });
+  assert.deepEqual(state.sheets, before.sheets);
+  assert.deepEqual(state.records, before.records);
+  assert.equal(rows(B.buildCustomerWorkbook(state.records, state.fields, false, state.sheets), '空表').length, 1);
+});
+
+test('sheet deletion undo survives reload and schema changes without reverting other customer edits', async () => {
+  let state = append(importSeparate());
+  const deletedRecords = state.records.slice(0, 2);
+  const other = state.records[2];
+  state = W.reducer(state, { type: 'deleteSheet', id: state.sheets[0].id });
+  state = W.reducer(state, { type: 'edit', id: other.id, key: 'company', value: 'Edited after deletion' });
+  state = W.reducer(state, { type: 'removeField', key: 'phone' });
+  state = W.reducer(state, { type: 'addField', key: 'custom_new', name: '新增字段' });
+  const factory = new IDBFactory();
+  const saved = await L.writeLocalWorkspace(state, null, factory);
+  state = (await L.readLocalWorkspace(factory)).workspace;
+  state = W.reducer(state, { type: 'undoDelete' });
+  assert.equal(state.records[2].company, 'Edited after deletion');
+  assert.deepEqual(state.records.slice(0, 2).map(r => r.id), deletedRecords.map(r => r.id));
+  assert.equal(state.records[0].phone, undefined);
+  assert.equal(state.records[0].custom_new, '');
+  assert.equal(state.records[1].pendingIdentity, true);
+  assert.deepEqual(state.records[0].sourceCells, deletedRecords[0].sourceCells);
+  await L.writeLocalWorkspace(state, saved.revision, factory);
+  assert.equal((await L.readLocalWorkspace(factory)).workspace.sheets.length, 3);
+});
+
+test('only the last effective deletion is undoable across row and sheet deletions', () => {
+  const original = append(importSeparate());
+  let state = W.reducer(original, { type: 'deleteSheet', id: original.sheets[0].id });
+  assert.equal(W.reducer(state, { type: 'delete', ids: ['absent'] }), state);
+  assert.equal(W.reducer(state, { type: 'deleteSheet', id: 'absent' }), state);
+  assert.equal(W.reducer(state, { type: 'deleteSheet', id: '' }), state);
+  state = W.reducer(state, { type: 'delete', ids: [state.records[0].id] });
+  assert.equal(state.deletedSheet, null);
+  state = W.reducer(state, { type: 'undoDelete' });
+  assert.equal(state.records.length, 1);
+  assert.equal(state.sheets.length, 2);
+  state = W.reducer(original, { type: 'delete', ids: [original.records[0].id] });
+  state = W.reducer(state, { type: 'deleteSheet', id: original.sheets[0].id });
+  state = W.reducer(state, { type: 'undoDelete' });
+  assert.ok(!state.records.some(r => r.id === original.records[0].id));
+  assert.equal(state.records.length, 2);
+  assert.equal(state.sheets.length, 3);
+});
+
+test('deleting the merged customer group leaves independent sheets intact and can be undone', () => {
+  let state = append(importSeparate());
+  const merged = B.importWorkbook({ ...fixture('merged'), mergeSheets: true }, C.fields);
+  state = W.reducer(state, { type: 'append', ...merged });
+  const before = state;
+  state = W.reducer(state, { type: 'deleteSheet', id: S.UNGROUPED_SHEET });
+  assert.equal(state.records.length, 3);
+  assert.equal(state.deleted.length, 3);
+  assert.deepEqual(state.sheets, before.sheets);
+  assert.equal(state.deletedSheet, null);
+  assert.ok(state.records.every(r => !!r.sheetId));
+  state = W.reducer(state, { type: 'undoDelete' });
+  assert.deepEqual(state.records, before.records);
+});
+
+test('legacy saved data migrates and corrupt deleted-sheet metadata cannot orphan live records', () => {
+  const legacy = append(importSeparate());
+  delete legacy.deletedSheet;
+  const envelope = workspace => ({ version: 1, revision: 'r', savedAt: 1, workspace });
+  assert.equal(L.decodeWorkspace(envelope(legacy)).workspace.deletedSheet, null);
+  const original = append(importSeparate());
+  const state = W.reducer(original, { type: 'deleteSheet', id: original.sheets[0].id });
+  for (const deletedSheet of [[], {}, { ...state.deletedSheet, index: -1 },
+    { ...state.deletedSheet, sheet: state.sheets[0] },
+    { ...state.deletedSheet, sheet: { ...state.deletedSheet.sheet, id: S.UNGROUPED_SHEET } }]) {
+    assert.throws(() => L.decodeWorkspace(envelope({ ...state, deletedSheet })), /未被覆盖/);
+  }
+  assert.throws(() => L.decodeWorkspace(envelope({ ...state, deletedSheet: null })), /未被覆盖/);
+  assert.throws(() => L.decodeWorkspace(envelope({ ...state, records: original.records })), /未被覆盖/);
+  assert.throws(() => W.reducer(state, { type: 'append', records: [], sheets: [state.deletedSheet.sheet] }), /撤销恢复/);
+});
+
+test('deleting the last sheet removes it completely; undo record limits leave recovery data intact', () => {
+  const source = fixture();
+  source.book.SheetNames = ['空表'];
+  source.sheet = '空表';
+  let state = append(B.importWorkbook(source, C.fields));
+  state = W.reducer(state, { type: 'deleteSheet', id: state.sheets[0].id });
+  assert.deepEqual(state.sheets, []);
+  assert.deepEqual(state.records, []);
+  assert.equal(W.reducer(state, { type: 'undoDelete' }).sheets.length, 1);
+  const original = append(importSeparate());
+  state = W.reducer(original, { type: 'deleteSheet', id: original.sheets[0].id });
+  state = { ...state, records: Array.from({ length: W.MAX_RECORDS }, (_, i) => ({ id: 'manual-' + i })) };
+  const recovery = state.deletedSheet;
+  assert.throws(() => W.reducer(state, { type: 'undoDelete' }), /50,000/);
+  assert.equal(state.deletedSheet, recovery);
+  assert.equal(state.deleted.length, 2);
+});

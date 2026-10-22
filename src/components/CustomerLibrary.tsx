@@ -60,6 +60,7 @@ interface Props {
   sheetGroups: Array<WorkspaceSheet & { records: Customer[] }>;
   sheetSelection: string;
   onSheetSelection: (id: string) => void;
+  onDeleteSheet: () => void;
   multipleSheets: boolean;
   filtered: Customer[];
   category: Category;
@@ -75,6 +76,7 @@ interface Props {
   onAdd: () => void;
   onDelete: () => void;
   deletedCount: number;
+  deletedSheetName?: string;
   onUndoDelete: () => void;
   onAdmit: () => void;
   onImport: () => void;
@@ -302,7 +304,7 @@ export function CustomerLibrary(p: Props) {
           </Button>
         </div>
       </div>
-      {p.sheetGroups.some(s => s.id !== UNGROUPED_SHEET) && <div className="library-sheet-switcher">
+      {(!!p.records.length || p.sheetGroups.some(s => s.id !== UNGROUPED_SHEET)) && <div className="library-sheet-switcher">
         <label htmlFor="library-sheet-selection">查看工作表</label>
         <Select id="library-sheet-selection" aria-label="资料库工作表" showSearch optionFilterProp="label"
           value={p.sheetSelection} onChange={p.onSheetSelection}
@@ -310,6 +312,11 @@ export function CustomerLibrary(p: Props) {
             { value: "", label: "全部工作表 · " + p.records.length + " 条" },
             ...p.sheetGroups.map(s => ({ value: s.id, label: s.name + " · " + s.records.length + " 条 · " + s.sourceName })),
           ]} />
+        <Tooltip title={p.sheetSelection ? "删除当前工作表及其中全部客户，可撤销" : "请先选择具体工作表"}>
+          <Button danger icon={<DeleteOutlined />} disabled={!p.sheetSelection} onClick={p.onDeleteSheet}>
+            删除工作表
+          </Button>
+        </Tooltip>
         <span>新增客户归入{(p.sheetGroups.find(s => s.id === p.sheetSelection) || (p.sheetGroups.length === 1 ? p.sheetGroups[0] : null))?.name || "客户资料"}；导出包含全部工作表。</span>
       </div>}
       <RulesPanel category={p.category} />
@@ -356,8 +363,8 @@ export function CustomerLibrary(p: Props) {
           <Button type="primary" icon={<CloudUploadOutlined />} onClick={p.onImport}>
             导入客户
           </Button>
-          {!!p.deletedCount && <Button icon={<UndoOutlined />} onClick={p.onUndoDelete}>
-            撤销上次删除 ({p.deletedCount})
+          {(!!p.deletedCount || !!p.deletedSheetName) && <Button icon={<UndoOutlined />} onClick={p.onUndoDelete}>
+            撤销上次删除 ({p.deletedSheetName ? "1 张表，" : ""}{p.deletedCount} 条)
           </Button>}
         </div>
       </div>

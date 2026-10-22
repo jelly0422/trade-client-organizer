@@ -247,6 +247,29 @@ export default function App() {
         message.success("已删除所选客户，可撤销上次删除。");
       },
     });
+  const onDeleteSheet = () => {
+    const sheet = sheetGroups.find(s => s.id === sheetSelection);
+    if (!sheet) return;
+    modal.confirm({
+      title: `删除工作表“${sheet.name}”？`,
+      content: <>
+        <p>来源：{sheet.sourceName}</p>
+        <p>将删除这张工作表及其中全部 {sheet.records.length} 条客户（含缺少主体记录），不受搜索、分类或分页影响。</p>
+        <p>可通过“撤销上次删除”恢复工作表和数据；再次删除会替换本次撤销记录。电脑上的原文件会保留。</p>
+      </>,
+      okText: "删除工作表",
+      cancelText: "取消",
+      okButtonProps: { danger: true },
+      onOk: () => {
+        dispatch({ type: "deleteSheet", id: sheet.id });
+        setSelected(new Set());
+        setSheetSelection("");
+        setQuery("");
+        changeCategory("all");
+        message.success(`已删除“${sheet.name}”及 ${sheet.records.length} 条客户，可撤销。`);
+      },
+    });
+  };
   const onAdmit = () => {
     const ready = workspace.records
       .filter(
@@ -283,9 +306,11 @@ export default function App() {
     }
     dispatch({ type: "undoDelete" });
     setQuery("");
-    setSheetSelection("");
-    changeCategory(workspace.deleted.every(({ record }) => C.pendingIdentity(record)) ? "missing" : "all");
-    message.success(`已恢复 ${workspace.deleted.length} 条客户及其原始内容。`);
+    setSheetSelection(workspace.deletedSheet?.sheet.id || "");
+    changeCategory(workspace.deleted.length && workspace.deleted.every(({ record }) => C.pendingIdentity(record)) ? "missing" : "all");
+    message.success(workspace.deletedSheet
+      ? `已恢复工作表“${workspace.deletedSheet.sheet.name}”及 ${workspace.deleted.length} 条客户。`
+      : `已恢复 ${workspace.deleted.length} 条客户及其原始内容。`);
   };
   const onFillOriginal = (value: string) => {
     const record = workspace.records.find(r => r.id === original?.id);
@@ -502,6 +527,7 @@ export default function App() {
             sheetGroups={sheetGroups}
             sheetSelection={sheetSelection}
             onSheetSelection={(value) => { setSheetSelection(value); setPage(1); setSelected(new Set()); }}
+            onDeleteSheet={onDeleteSheet}
             multipleSheets={multipleSheets}
             filtered={filtered}
             category={category}
@@ -524,6 +550,7 @@ export default function App() {
             onAdd={onAdd}
             onDelete={onDelete}
             deletedCount={workspace.deleted.length}
+            deletedSheetName={workspace.deletedSheet?.sheet.name}
             onUndoDelete={onUndoDelete}
             onAdmit={onAdmit}
             onImport={() => openImport()}
@@ -666,7 +693,7 @@ export default function App() {
             <section>
               <h3>导出全部记录</h3>
               <p>
-                导出不受工作表筛选、搜索和分页影响。选择保留工作表时，Excel 按原表分开保存，缺少主体的记录保留在所属表并标注分类；空表也保留，同名表自动加序号。原始内容另附一张表。多个工作表须使用 Excel 导出。客户、工作表归属、字段配置与最近一次删除记录会自动保存到当前浏览器。
+                导出不受工作表筛选、搜索和分页影响。选择保留工作表时，Excel 按原表分开保存，缺少主体的记录保留在所属表并标注分类；空表也保留，同名表自动加序号。选择具体工作表后，可删除该表及全部记录，支持撤销最近一次删除（包括空表）。原始内容另附一张表。多个工作表须使用 Excel 导出。客户、工作表归属、字段配置与最近一次删除记录会自动保存到当前浏览器。
               </p>
             </section>
           </div>

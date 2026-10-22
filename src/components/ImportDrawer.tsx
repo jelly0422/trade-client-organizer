@@ -300,12 +300,12 @@ export function ImportDrawer(p: Props) {
               showIcon
               title={
                 done
-                  ? "这份文件的全部工作表已加入资料库"
+                  ? "这份文件已完成导入"
                   : `识别 ${records.length} 条非空记录`
               }
               description={
                 done
-                  ? "可在资料库切换工作表，或选择其他文件继续导入。"
+                  ? "可在资料库整理或删除工作表；已删除的数据可撤销恢复，或重新选择文件导入。"
                   : `${records.length - missing} 条进入全部客户，${missing} 条进入缺少主体；仅跳过整行空白。${source.mergeSheets === false || source.book.SheetNames.length === 1 ? "空工作表也会保留。" : ""}`
               }
             />

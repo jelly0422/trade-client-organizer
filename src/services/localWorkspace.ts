@@ -23,12 +23,19 @@ export function decodeWorkspace(value: unknown): SavedWorkspace | null {
   const sheets = w.sheets === undefined ? [] : w.sheets;
   if (!Array.isArray(sheets)) return fail();
   const sheetIds = new Set<string>();
+  const validSheet = (sheet: unknown) => object(sheet) &&
+    typeof sheet.id === "string" && !!sheet.id && sheet.id !== UNGROUPED_SHEET &&
+    typeof sheet.name === "string" && !!sheet.name.trim() && typeof sheet.sourceName === "string";
   for (const sheet of sheets) {
-    if (!object(sheet) || typeof sheet.id !== "string" || !sheet.id ||
-        sheet.id === UNGROUPED_SHEET || sheetIds.has(sheet.id) ||
-        typeof sheet.name !== "string" || !sheet.name.trim() ||
-        typeof sheet.sourceName !== "string") return fail();
+    if (!validSheet(sheet) || sheetIds.has(sheet.id)) return fail();
     sheetIds.add(sheet.id);
+  }
+  const deletedSheet = w.deletedSheet === undefined ? null : w.deletedSheet;
+  const recoverableSheetIds = new Set(sheetIds);
+  if (deletedSheet !== null) {
+    if (!object(deletedSheet) || !Number.isInteger(deletedSheet.index) || deletedSheet.index < 0 ||
+        !validSheet(deletedSheet.sheet) || sheetIds.has(deletedSheet.sheet.id)) return fail();
+    recoverableSheetIds.add(deletedSheet.sheet.id);
   }
   if (!Array.isArray(w.fields) || w.fields.length < 3 || w.fields.length > 40 ||
       !Array.isArray(w.records) || w.records.length > MAX_RECORDS ||
@@ -42,7 +49,7 @@ export function decodeWorkspace(value: unknown): SavedWorkspace | null {
     keys.add(f.key);
   }
   if (!fixedKeys.every(key => keys.has(key))) return fail();
-  const validateRecords = (records: unknown[]) => {
+  const validateRecords = (records: unknown[], allowedSheets: Set<string>) => {
     const ids = new Set<string>();
     for (const r of records) {
       if (!object(r) || typeof r.id !== "string" || !r.id || ids.has(r.id) ||
@@ -50,7 +57,7 @@ export function decodeWorkspace(value: unknown): SavedWorkspace | null {
           (r.source !== undefined && typeof r.source !== "string") ||
           (r.sourceRow !== undefined && typeof r.sourceRow !== "string" && typeof r.sourceRow !== "number")) return false;
       ids.add(r.id);
-      if (r.sheetId !== undefined && (typeof r.sheetId !== "string" || !sheetIds.has(r.sheetId))) return false;
+      if (r.sheetId !== undefined && (typeof r.sheetId !== "string" || !allowedSheets.has(r.sheetId))) return false;
       if ([...keys].some(key => r[key] !== undefined && typeof r[key] !== "string" && typeof r[key] !== "number")) return false;
       if (r.sourceCells !== undefined && (!Array.isArray(r.sourceCells) || !r.sourceCells.every((c: unknown) =>
         object(c) && Number.isInteger(c.column) && c.column > 0 &&
@@ -58,11 +65,11 @@ export function decodeWorkspace(value: unknown): SavedWorkspace | null {
     }
     return true;
   };
-  if (!validateRecords(w.records) || !w.deleted.every((d: unknown) => object(d) &&
+  if (!validateRecords(w.records, sheetIds) || !w.deleted.every((d: unknown) => object(d) &&
       Number.isInteger(d.index) && d.index >= 0 && d.index < MAX_RECORDS) ||
-      !validateRecords(w.deleted.map((d: any) => d.record))) return fail();
+      !validateRecords(w.deleted.map((d: any) => d.record), recoverableSheetIds)) return fail();
   // Older saved workspaces have no sheet registry; their records remain intact.
-  return { ...value, workspace: { ...w, sheets } } as SavedWorkspace;
+  return { ...value, workspace: { ...w, sheets, deletedSheet } } as SavedWorkspace;
 }
 
 function openDatabase(factory: IDBFactory) {

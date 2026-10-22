@@ -1,6 +1,6 @@
 import * as C from "../domain/core.ts";
 import type { Customer, Field } from "../domain/core.ts";
-import type { WorkspaceSheet } from "../domain/sheets.ts";
+import { UNGROUPED_SHEET, type WorkspaceSheet } from "../domain/sheets.ts";
 
 export type Category = "all" | "review" | "duplicate" | "missing";
 export const MAX_RECORDS = 50000;
@@ -9,6 +9,7 @@ export interface Workspace {
   records: Customer[];
   dirty: boolean;
   deleted: { record: Customer; index: number }[];
+  deletedSheet: { sheet: WorkspaceSheet; index: number } | null;
   sheets: WorkspaceSheet[];
 }
 export const initialWorkspace = (): Workspace => ({
@@ -16,6 +17,7 @@ export const initialWorkspace = (): Workspace => ({
   records: [],
   dirty: false,
   deleted: [],
+  deletedSheet: null,
   sheets: [],
 });
 export type Action =
@@ -23,6 +25,7 @@ export type Action =
   | { type: "append"; records: Customer[]; sheets?: WorkspaceSheet[] }
   | { type: "edit"; id: string; key: string; value: string }
   | { type: "delete"; ids: string[] }
+  | { type: "deleteSheet"; id: string }
   | { type: "undoDelete" }
   | { type: "admit"; ids: string[] }
   | { type: "addField"; name: string; key: string }
@@ -39,6 +42,8 @@ export function reducer(state: Workspace, action: Action): Workspace {
     const ids = new Set(sheets.map(s => s.id));
     for (const sheet of action.sheets || []) {
       if (ids.has(sheet.id)) throw Error("这张工作表已导入，请勿重复添加。");
+      if (state.deletedSheet?.sheet.id === sheet.id)
+        throw Error("这张工作表可通过撤销恢复，请勿重复添加。");
       sheets.push(sheet);
       ids.add(sheet.id);
     }
@@ -79,14 +84,40 @@ export function reducer(state: Workspace, action: Action): Workspace {
       dirty: true,
       records: state.records.filter((r) => !ids.has(r.id)),
       deleted,
+      deletedSheet: null,
+    };
+  }
+  if (action.type === "deleteSheet") {
+    const index = state.sheets.findIndex(sheet => sheet.id === action.id);
+    if (action.id !== UNGROUPED_SHEET && index < 0) return state;
+    const belongs = (record: Customer) => action.id === UNGROUPED_SHEET
+      ? !record.sheetId : record.sheetId === action.id;
+    // Use the whole workspace, including pending and currently hidden records.
+    const deleted = state.records.flatMap((record, index) =>
+      belongs(record) ? [{ record, index }] : [],
+    );
+    if (index < 0 && !deleted.length) return state;
+    return {
+      ...state,
+      records: state.records.filter(record => !belongs(record)),
+      sheets: state.sheets.filter(sheet => sheet.id !== action.id),
+      deleted,
+      deletedSheet: index < 0 ? null : { sheet: state.sheets[index], index },
+      dirty: true,
     };
   }
   if (action.type === "undoDelete") {
+    if (!state.deleted.length && !state.deletedSheet) return state;
     const existing = new Set(state.records.map(r => r.id));
     const deleted = state.deleted.filter(({ record }) => !existing.has(record.id));
     if (state.records.length + deleted.length > MAX_RECORDS)
       throw Error("恢复后将超过 50,000 条上限，请先减少当前记录再撤销。");
     const records = [...state.records];
+    const sheets = [...state.sheets];
+    if (state.deletedSheet) {
+      const { sheet, index } = state.deletedSheet;
+      sheets.splice(Math.min(index, sheets.length), 0, sheet);
+    }
     for (const { record, index } of deleted) {
       // Restore only fields still present in the current schema, preserving provenance.
       const restored: Customer = {
@@ -97,7 +128,7 @@ export function reducer(state: Workspace, action: Action): Workspace {
       };
       records.splice(Math.min(index, records.length), 0, restored);
     }
-    return { ...state, records, deleted: [], dirty: true };
+    return { ...state, records, sheets, deleted: [], deletedSheet: null, dirty: true };
   }
   if (action.type === "admit") {
     const ids = new Set(action.ids);
