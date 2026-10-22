@@ -39,9 +39,12 @@ ModuleRegistry.registerModules([AllCommunityModule]);
 const gridTheme = themeQuartz.withParams({
   accentColor: "#0588ad",
   backgroundColor: "transparent",
+  // Reduce editor transparency by 80%; focus/invalid states inherit this fill.
+  inputBackgroundColor: "rgba(255,255,255,.8)",
   foregroundColor: "#24485d",
   borderColor: "rgba(140,178,195,.22)",
-  headerBackgroundColor: "rgba(229,241,245,.72)",
+  // Keep 30% of the previous 28% transparency: 1 - (1 - .72) * .3.
+  headerBackgroundColor: "rgba(229,241,245,.916)",
   headerTextColor: "#4b687a",
   fontFamily: 'Inter, "Segoe UI", "Microsoft YaHei", sans-serif',
   fontSize: 13,
