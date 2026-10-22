@@ -1,5 +1,7 @@
 import * as C from "../domain/core.ts";
 import type { Customer, Field, Mapping } from "../domain/core.ts";
+import { customerSheetGroups, uniqueWorksheetName, UNGROUPED_SHEET, type WorkspaceSheet } from "../domain/sheets.ts";
+import { MAX_RECORDS } from "../state/workspace.ts";
 
 interface Sheet {
   [key: string]: unknown;
@@ -46,6 +48,7 @@ export interface FileSource {
   configs: Record<string, SheetConfig>;
   encoding: string;
   demo?: boolean;
+  mergeSheets?: boolean;
 }
 export const uid = () => crypto.randomUUID();
 export function xlsx() {
@@ -120,6 +123,29 @@ export function mappedSource(source: FileSource, fields: Field[]) {
     offset.r,
     offset.c,
   );
+}
+export function mappedWorkbook(source: FileSource, fields: Field[]) {
+  let count = 0;
+  return source.book.SheetNames.map((name, index) => {
+    const configured = withConfig({ ...source, sheet: name }, fields);
+    const records = mappedSource(configured, fields);
+    count += records.length;
+    if (count > MAX_RECORDS) throw Error("该文件超过 50,000 条记录，请分批整理。");
+    return { id: source.id + ":sheet:" + index, name, sourceName: source.name, records };
+  });
+}
+export function importWorkbook(source: FileSource, fields: Field[]) {
+  if (source.book.SheetNames.length > 1 && source.mergeSheets === undefined)
+    throw Error("请先选择是否合并工作表。");
+  const groups = mappedWorkbook(source, fields);
+  return {
+    sheets: source.mergeSheets ? [] : groups.map(({ id, name, sourceName }) => ({ id, name, sourceName })),
+    records: groups.flatMap(group => group.records.map(record => ({
+      ...record,
+      id: uid(),
+      ...(source.mergeSheets ? {} : { sheetId: group.id }),
+    }))),
+  };
 }
 export async function readFile(file: File, fields: Field[]) {
   if (!/\.(xlsx|xls|csv|tsv|ods)$/i.test(file.name))
@@ -254,13 +280,15 @@ export function exportCustomers(
   fields: Field[],
   format: "xlsx" | "csv",
   template = false,
+  sheets: WorkspaceSheet[] = [],
 ) {
   const name = template
     ? "外贸客户标准模板"
     : "外贸客户资料_" + new Date().toLocaleDateString("sv-SE");
-  const matrix = C.exportMatrix(template ? [] : records, fields, template);
   if (format === "csv" && !template) {
-    const rows = matrix.map((row, i) => [
+    if (customerSheetGroups(records, sheets).length > 1)
+      throw Error("CSV 不支持多个工作表，请选择 Excel 格式以保留工作表结构。");
+    const rows = C.exportMatrix(records, fields).map((row, i) => [
       ...row,
       i === 0 ? "原始内容" : JSON.stringify(records[i - 1].sourceCells || []),
     ]);
@@ -276,28 +304,37 @@ export function exportCustomers(
     );
     return;
   }
+  xlsx().writeFile(buildCustomerWorkbook(records, fields, template, sheets), name + ".xlsx");
+}
+export function buildCustomerWorkbook(
+  records: Customer[], fields: Field[], template = false, sheets: WorkspaceSheet[] = [],
+) {
   const book = xlsx().utils.book_new();
+  const used = new Set<string>();
   const append = (rows: unknown[][], title: string) => {
     const sheet = xlsx().utils.aoa_to_sheet(rows);
     sheet["!cols"] = rows[0].map((h) => ({
       wch: Math.max(20, Math.min(40, String(h).length * 2 + 8)),
     }));
     if (rows.length > 1) sheet["!autofilter"] = { ref: sheet["!ref"] };
-    xlsx().utils.book_append_sheet(book, sheet, title);
+    xlsx().utils.book_append_sheet(book, sheet, uniqueWorksheetName(title, used));
   };
-  append(
-    template
-      ? matrix
-      : C.exportMatrix(
-          records.filter((r) => !C.pendingIdentity(r)),
-          fields,
-        ),
-    "客户资料",
-  );
-  const pending = records.filter(C.pendingIdentity);
-  if (!template && pending.length)
-    append(C.exportMatrix(pending, fields), "缺少主体");
-  const raw = C.recoveryMatrix(template ? [] : records);
+  if (template) {
+    append(C.exportMatrix([], fields, true), "客户资料");
+    return book;
+  }
+  const duplicates = C.duplicateIds(records.filter(r => !C.pendingIdentity(r)));
+  for (const group of customerSheetGroups(records, sheets)) {
+    if (group.id === UNGROUPED_SHEET) {
+      append(C.exportMatrix(group.records.filter(r => !C.pendingIdentity(r)), fields, false, duplicates), group.name);
+      const pending = group.records.filter(C.pendingIdentity);
+      if (pending.length) append(C.exportMatrix(pending, fields, false, duplicates), "缺少主体");
+    } else {
+      // Keep pending records in their original worksheet, marked by the status columns.
+      append(C.exportMatrix(group.records, fields, false, duplicates), group.name);
+    }
+  }
+  const raw = C.recoveryMatrix(records);
   if (raw.length > 1) append(raw, "导入原始内容");
-  xlsx().writeFile(book, name + ".xlsx");
+  return book;
 }

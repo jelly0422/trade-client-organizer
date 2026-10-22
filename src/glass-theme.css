@@ -222,6 +222,16 @@ body { background: transparent; }
 .original-content label span { color: #607a8b; }
 .workspace-loading { color: #f0ffff; }
 .workspace-loading > .ant-alert { max-width: 640px; }
+.integrated-fields { max-width: 650px; margin: 12px auto 20px; }
+.import-drawer .ant-tabs-nav { margin-bottom: 22px; }
+.sheet-mode { margin: 20px 0; padding: 18px 20px; border-radius: 15px; background: #dff5f5a6; border: 1px solid #c7e3e966; }
+.sheet-mode h3 { margin: 0 0 12px; font-size: 15px; color: #204b60; }
+.sheet-mode .ant-radio-group { display: flex; flex-wrap: wrap; gap: 12px; }
+.sheet-mode p { margin: 12px 0 0; color: #486778; font-size: 12px; line-height: 1.8; }
+.library-sheet-switcher { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin: 0 22px 18px; padding: 12px 14px; border-radius: 12px; background: #e2f2f680; }
+.library-sheet-switcher label { color: #315f73; font-size: 12px; white-space: nowrap; }
+.library-sheet-switcher .ant-select { flex: 1; min-width: 180px; max-width: 460px; }
+.library-sheet-switcher > span { color: #516c7d; font-size: 11px; flex-basis: 100%; overflow-wrap: anywhere; }
 
 @media (max-width: 1100px) {
   .workspace-shell { padding: 18px; }

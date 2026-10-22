@@ -1,6 +1,7 @@
 import { fixedKeys, fields as defaultFields } from "../domain/core.ts";
 import { MAX_RECORDS } from "../state/workspace.ts";
 import type { Workspace } from "../state/workspace.ts";
+import { UNGROUPED_SHEET } from "../domain/sheets.ts";
 
 export interface SavedWorkspace {
   version: 1;
@@ -19,6 +20,16 @@ export function decodeWorkspace(value: unknown): SavedWorkspace | null {
   if (!object(value) || value.version !== 1 || typeof value.revision !== "string" ||
       !Number.isFinite(value.savedAt) || !object(value.workspace)) return fail();
   const w = value.workspace;
+  const sheets = w.sheets === undefined ? [] : w.sheets;
+  if (!Array.isArray(sheets)) return fail();
+  const sheetIds = new Set<string>();
+  for (const sheet of sheets) {
+    if (!object(sheet) || typeof sheet.id !== "string" || !sheet.id ||
+        sheet.id === UNGROUPED_SHEET || sheetIds.has(sheet.id) ||
+        typeof sheet.name !== "string" || !sheet.name.trim() ||
+        typeof sheet.sourceName !== "string") return fail();
+    sheetIds.add(sheet.id);
+  }
   if (!Array.isArray(w.fields) || w.fields.length < 3 || w.fields.length > 40 ||
       !Array.isArray(w.records) || w.records.length > MAX_RECORDS ||
       !Array.isArray(w.deleted) || w.deleted.length > MAX_RECORDS || typeof w.dirty !== "boolean") return fail();
@@ -39,6 +50,7 @@ export function decodeWorkspace(value: unknown): SavedWorkspace | null {
           (r.source !== undefined && typeof r.source !== "string") ||
           (r.sourceRow !== undefined && typeof r.sourceRow !== "string" && typeof r.sourceRow !== "number")) return false;
       ids.add(r.id);
+      if (r.sheetId !== undefined && (typeof r.sheetId !== "string" || !sheetIds.has(r.sheetId))) return false;
       if ([...keys].some(key => r[key] !== undefined && typeof r[key] !== "string" && typeof r[key] !== "number")) return false;
       if (r.sourceCells !== undefined && (!Array.isArray(r.sourceCells) || !r.sourceCells.every((c: unknown) =>
         object(c) && Number.isInteger(c.column) && c.column > 0 &&
@@ -49,7 +61,8 @@ export function decodeWorkspace(value: unknown): SavedWorkspace | null {
   if (!validateRecords(w.records) || !w.deleted.every((d: unknown) => object(d) &&
       Number.isInteger(d.index) && d.index >= 0 && d.index < MAX_RECORDS) ||
       !validateRecords(w.deleted.map((d: any) => d.record))) return fail();
-  return value as unknown as SavedWorkspace;
+  // Older saved workspaces have no sheet registry; their records remain intact.
+  return { ...value, workspace: { ...w, sheets } } as SavedWorkspace;
 }
 
 function openDatabase(factory: IDBFactory) {

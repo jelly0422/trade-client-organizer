@@ -15,6 +15,7 @@ export interface CustomerRecord {
   sourceRow?: number | string;
   pendingIdentity?: boolean;
   sourceCells?: SourceCell[];
+  sheetId?: string;
 }
 export interface Customer extends CustomerRecord {
   id: string;
@@ -347,10 +348,10 @@ export function exportMatrix(
   records: CustomerRecord[],
   schema = fields,
   template = false,
+  duplicates = duplicateIds(records.filter((r) => !pendingIdentity(r))),
 ) {
   const headers = schema.map((f) => f.label);
   if (template) return [headers];
-  const duplicates = duplicateIds(records.filter((r) => !pendingIdentity(r)));
   return [
     [...headers, "来源文件 / 工作表", "原始行号", "校对提示", "记录分类"],
     ...records.map((r) => [

@@ -25,7 +25,6 @@ import {
   LockOutlined,
   QuestionCircleOutlined,
   SafetyCertificateOutlined,
-  SettingOutlined,
   TeamOutlined,
   WarningOutlined,
 } from "@ant-design/icons";
@@ -33,7 +32,7 @@ import * as C from "./domain/core";
 import type { Customer } from "./domain/core";
 import { CustomerLibrary } from "./components/CustomerLibrary";
 import { ImportDrawer } from "./components/ImportDrawer";
-import { FieldsDrawer } from "./components/FieldsDrawer";
+import { customerSheetGroups, recordsInSheet } from "./domain/sheets";
 import { useLocalWorkspace } from "./hooks/useLocalWorkspace";
 import { useGlassPointer } from "./hooks/useGlassPointer";
 import {
@@ -46,7 +45,7 @@ import {
 import {
   demoSource,
   exportCustomers,
-  mappedSource,
+  importWorkbook,
   parseBook,
   readFile,
   synchronizeSchema,
@@ -92,8 +91,13 @@ export default function App() {
   const [imported, setImported] = useState(new Set<string>()),
     [busy, setBusy] = useState(false);
   const [importOpen, setImportOpen] = useState(false),
-    [fieldsOpen, setFieldsOpen] = useState(false),
+    [importPanel, setImportPanel] = useState<"mapping" | "fields">("mapping"),
     [helpOpen, setHelpOpen] = useState(false);
+  const [sheetSelection, setSheetSelection] = useState("");
+  const openImport = (panel: "mapping" | "fields" = "mapping") => {
+    setImportPanel(panel);
+    setImportOpen(true);
+  };
   const [category, setCategory] = useState<Category>("all"),
     [query, setQuery] = useState("");
   const [page, setPage] = useState(1),
@@ -102,6 +106,12 @@ export default function App() {
   const [original, setOriginal] = useState<Customer | null>(null),
     [format, setFormat] = useState<"xlsx" | "csv">("xlsx");
   const [originalTarget, setOriginalTarget] = useState<string>();
+  const sheetGroups = useMemo(() => customerSheetGroups(workspace.records, workspace.sheets), [workspace.records, workspace.sheets]);
+  const multipleSheets = sheetGroups.length > 1;
+  useEffect(() => { if (multipleSheets) setFormat("xlsx"); }, [multipleSheets]);
+  useEffect(() => {
+    if (sheetSelection && !sheetGroups.some(s => s.id === sheetSelection)) setSheetSelection("");
+  }, [sheetGroups, sheetSelection]);
   const summary = useMemo(
     () => summarize(workspace.records),
     [workspace.records],
@@ -109,13 +119,13 @@ export default function App() {
   const filtered = useMemo(
     () =>
       filterRecords(
-        workspace.records,
+        recordsInSheet(workspace.records, sheetSelection),
         workspace.fields,
         category,
         query,
         summary,
       ),
-    [workspace.records, workspace.fields, category, query, summary],
+    [workspace.records, workspace.fields, category, query, summary, sheetSelection],
   );
   useEffect(() => {
     setSources((previous) => synchronizeSchema(previous, workspace.fields));
@@ -139,7 +149,7 @@ export default function App() {
   const onFiles = async (files: File[]) => {
     if (busy) return;
     setBusy(true);
-    setImportOpen(true);
+    openImport();
     const added: FileSource[] = [];
     for (const file of files) {
       try {
@@ -164,7 +174,7 @@ export default function App() {
         setSources((previous) => [...previous, source]);
         setCurrent(source.id);
       }
-      setImportOpen(true);
+      openImport();
     } catch (e) {
       message.error((e as Error).message);
     }
@@ -172,21 +182,22 @@ export default function App() {
   const onApply = () => {
     const source = sources.find((s) => s.id === current);
     if (!source) return;
-    const key = source.id + ":" + source.sheet;
+    const key = source.id;
     if (imported.has(key)) return;
-    const records = mappedSource(source, workspace.fields).map((r) => ({
-      ...r,
-      id: uid(),
-    }));
+    let batch: ReturnType<typeof importWorkbook>;
+    try { batch = importWorkbook(source, workspace.fields); }
+    catch (error) { message.error((error as Error).message); return; }
+    const { records, sheets } = batch;
     if (records.length + workspace.records.length > MAX_RECORDS) {
       message.error("当前最多保留 50,000 条记录，请分批整理。");
       return;
     }
     const missing = records.filter(C.pendingIdentity).length;
-    dispatch({ type: "append", records });
+    dispatch({ type: "append", records, sheets });
     setImported((previous) => new Set(previous).add(key));
     setQuery("");
-    changeCategory(missing === records.length ? "missing" : "all");
+    setSheetSelection("");
+    changeCategory(records.length && missing === records.length ? "missing" : "all");
     setImportOpen(false);
     message.success(
       `已保留 ${records.length} 条记录：全部客户 ${records.length - missing} 条，缺少主体 ${missing} 条。`,
@@ -197,6 +208,8 @@ export default function App() {
       message.warning("已达到 50,000 条记录上限，请分批整理。");
       return;
     }
+    const targetSheet = workspace.sheets.find(s => s.id === sheetSelection) ||
+      (!sheetSelection && sheetGroups.length === 1 ? workspace.sheets.find(s => s.id === sheetGroups[0].id) : undefined);
     const record: Customer = {
       id: uid(),
       ...Object.fromEntries(workspace.fields.map((f) => [f.key, ""])),
@@ -204,11 +217,12 @@ export default function App() {
       sourceRow: "",
       pendingIdentity: true,
       sourceCells: [],
+      ...(targetSheet ? { sheetId: targetSheet.id } : {}),
     };
     dispatch({ type: "append", records: [record] });
     changeCategory("missing");
     setQuery("");
-    setPage(Math.ceil((summary.counts.missing + 1) / pageSize));
+    setPage(Math.ceil((recordsInSheet(workspace.records, sheetSelection).filter(C.pendingIdentity).length + 1) / pageSize));
     message.info("已新增记录，请补齐客户名称、公司名和邮箱后勾选加入。");
   };
   const onEdit = useCallback((id: string, key: string, value: string) => {
@@ -251,7 +265,7 @@ export default function App() {
   };
   const onExport = (template = false) => {
     try {
-      exportCustomers(workspace.records, workspace.fields, format, template);
+      exportCustomers(workspace.records, workspace.fields, format, template, workspace.sheets);
       if (!template) dispatch({ type: "exported" });
       message.success(
         template
@@ -259,7 +273,7 @@ export default function App() {
           : `已生成全部 ${workspace.records.length} 条记录，请确认文件已保存。`,
       );
     } catch (e) {
-      message.error("导出失败，请检查过长单元格，或尝试 CSV 格式。");
+      message.error("导出失败：" + (e as Error).message);
     }
   };
   const onUndoDelete = () => {
@@ -269,6 +283,7 @@ export default function App() {
     }
     dispatch({ type: "undoDelete" });
     setQuery("");
+    setSheetSelection("");
     changeCategory(workspace.deleted.every(({ record }) => C.pendingIdentity(record)) ? "missing" : "all");
     message.success(`已恢复 ${workspace.deleted.length} 条客户及其原始内容。`);
   };
@@ -341,24 +356,13 @@ export default function App() {
                     className={`nav-item nav-subitem${importOpen ? " active" : ""}`}
                     aria-label="导入与映射"
                     title="导入与映射"
-                    onClick={() => setImportOpen(true)}
+                    onClick={() => openImport()}
                   >
                     <CloudUploadOutlined />
                     导入与映射
                     {sources.length > 0 && (
                       <span className="nav-count">{sources.length}</span>
                     )}
-                  </button>
-                </li>
-                <li>
-                  <button
-                    className={`nav-item nav-subitem${fieldsOpen ? " active" : ""}`}
-                    aria-label="字段设置"
-                    title="字段设置"
-                    onClick={() => setFieldsOpen(true)}
-                  >
-                    <SettingOutlined />
-                    字段设置
                   </button>
                 </li>
               </ul>
@@ -433,7 +437,7 @@ export default function App() {
           <div className="workspace-overline">
             <span>
               <ApartmentOutlined />
-              客户概览
+              客户概览{workspace.sheets.length > 0 ? " · 全部工作表" : ""}
             </span>
             <span role="status" data-testid="local-save-status">
               {saveState.status !== "saved" ? (
@@ -485,7 +489,7 @@ export default function App() {
                 <Button
                   type="link"
                   size="small"
-                  onClick={() => changeCategory("missing")}
+                  onClick={() => { setSheetSelection(""); changeCategory("missing"); }}
                 >
                   前往补充 <ArrowRightOutlined />
                 </Button>
@@ -495,6 +499,10 @@ export default function App() {
           <CustomerLibrary
             fields={workspace.fields}
             records={workspace.records}
+            sheetGroups={sheetGroups}
+            sheetSelection={sheetSelection}
+            onSheetSelection={(value) => { setSheetSelection(value); setPage(1); setSelected(new Set()); }}
+            multipleSheets={multipleSheets}
             filtered={filtered}
             category={category}
             summary={summary}
@@ -518,9 +526,9 @@ export default function App() {
             deletedCount={workspace.deleted.length}
             onUndoDelete={onUndoDelete}
             onAdmit={onAdmit}
-            onImport={() => setImportOpen(true)}
+            onImport={() => openImport()}
             onDemo={onDemo}
-            onFields={() => setFieldsOpen(true)}
+            onFields={() => openImport("fields")}
             onOriginal={(record) => { setOriginal(record); setOriginalTarget(undefined); }}
             format={format}
             onFormat={setFormat}
@@ -539,6 +547,10 @@ export default function App() {
         open={importOpen}
         onClose={() => setImportOpen(false)}
         fields={workspace.fields}
+        customers={workspace.records}
+        panel={importPanel}
+        onPanel={setImportPanel}
+        onMerge={(mergeSheets) => updateSource(s => ({ ...s, mergeSheets }))}
         sources={sources}
         current={current}
         imported={imported}
@@ -577,19 +589,13 @@ export default function App() {
         }}
         onApply={onApply}
         onDemo={onDemo}
-      />
-      <FieldsDrawer
-        open={fieldsOpen}
-        onClose={() => setFieldsOpen(false)}
-        fields={workspace.fields}
-        records={workspace.records}
-        onAdd={(name) => {
+        onAddField={(name) => {
           const key = "custom_" + uid().replaceAll("-", "");
           C.addField(workspace.fields, name, key);
           dispatch({ type: "addField", name, key });
           message.success("已添加字段。");
         }}
-        onRemove={(key) => {
+        onRemoveField={(key) => {
           dispatch({ type: "removeField", key });
           message.success("已删除字段。");
         }}
@@ -640,7 +646,7 @@ export default function App() {
               <h3>导入文件，核对字段</h3>
               <p>
                 支持
-                XLSX、XLS、CSV、TSV、ODS。选择工作表与表头行，核对自动映射；多张工作表分别添加。
+                XLSX、XLS、CSV、TSV、ODS。字段设置已整合在导入窗口内。多张工作表先选择合并或保留独立表，再逐表核对映射，一次添加整个文件。
               </p>
             </section>
           </div>
@@ -660,9 +666,7 @@ export default function App() {
             <section>
               <h3>导出全部记录</h3>
               <p>
-                导出不受搜索和分页影响。Excel
-                分表保存客户、缺少主体和原始内容；CSV
-                保留分类与原始内容。客户、字段配置、确认状态与最近一次删除记录会自动保存到当前浏览器，刷新后可继续整理。
+                导出不受工作表筛选、搜索和分页影响。选择保留工作表时，Excel 按原表分开保存，缺少主体的记录保留在所属表并标注分类；空表也保留，同名表自动加序号。原始内容另附一张表。多个工作表须使用 Excel 导出。客户、工作表归属、字段配置与最近一次删除记录会自动保存到当前浏览器。
               </p>
             </section>
           </div>

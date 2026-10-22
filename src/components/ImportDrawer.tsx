@@ -6,9 +6,11 @@ import {
   Drawer,
   Empty,
   InputNumber,
+  Radio,
   Select,
   Steps,
   Table,
+  Tabs,
   Tag,
   Tooltip,
   Upload,
@@ -21,9 +23,10 @@ import {
   LockOutlined,
 } from "@ant-design/icons";
 import * as C from "../domain/core";
-import type { Field } from "../domain/core";
+import type { Customer, Field } from "../domain/core";
+import { FieldSettings } from "./FieldSettings";
 import {
-  mappedSource,
+  mappedWorkbook,
   offsets,
   rowsFor,
   xlsx,
@@ -35,6 +38,12 @@ interface Props {
   open: boolean;
   onClose: () => void;
   fields: Field[];
+  customers: Customer[];
+  panel: "mapping" | "fields";
+  onPanel: (panel: "mapping" | "fields") => void;
+  onAddField: (name: string) => void;
+  onRemoveField: (key: string) => void;
+  onMerge: (merge: boolean) => void;
   sources: FileSource[];
   current: string;
   imported: Set<string>;
@@ -52,23 +61,18 @@ export function ImportDrawer(p: Props) {
   const source = p.sources.find((s) => s.id === p.current),
     cfg = source?.configs[source.sheet];
   const rows = useMemo(() => (source ? rowsFor(source) : []), [source]);
-  const records = useMemo(
-    () => (source ? mappedSource(source, p.fields) : []),
-    [source, p.fields],
-  );
+  const preview = useMemo(() => {
+    try { return { groups: source ? mappedWorkbook(source, p.fields) : [], error: "" }; }
+    catch (error) { return { groups: [], error: (error as Error).message }; }
+  }, [source, p.fields]);
+  const records = preview.groups.flatMap(group => group.records);
   const missing = records.filter(C.pendingIdentity).length;
   const headers = cfg ? rows[cfg.header] || [] : [];
-  const done = source ? p.imported.has(source.id + ":" + source.sheet) : false;
+  const done = source ? p.imported.has(source.id) : false;
+  const needsChoice = !!source && source.book.SheetNames.length > 1 && source.mergeSheets === undefined;
   const offset = source ? offsets(source) : { r: 0, c: 0 };
-  return (
-    <Drawer
-      title="导入与字段映射"
-      open={p.open}
-      onClose={p.onClose}
-      size={1040}
-      className="import-drawer"
-      extra={<Tag color="cyan">文件仅在本地处理</Tag>}
-    >
+  const mappingContent = (
+    <>
       <Steps
         size="small"
         current={source ? (done ? 2 : 1) : 0}
@@ -121,12 +125,25 @@ export function ImportDrawer(p: Props) {
                     {s.demo ? " · 虚构示例" : ""}
                   </small>
                 </span>
-                {p.imported.has(s.id + ":" + s.sheet) && (
+                {p.imported.has(s.id) && (
                   <CheckCircleOutlined />
                 )}
               </button>
             ))}
           </div>
+          {source.book.SheetNames.length > 1 && (
+            <section className="sheet-mode" aria-label="工作表导入方式">
+              <h3>发现 {source.book.SheetNames.length} 张工作表，是否合并？</h3>
+              <Radio.Group aria-label="是否合并工作表" value={source.mergeSheets} disabled={done || p.busy}
+                onChange={event => p.onMerge(event.target.value)}>
+                <Radio value={false}>保留独立工作表</Radio>
+                <Radio value={true}>合并为一张客户表</Radio>
+              </Radio.Group>
+              <p>{needsChoice ? "请选择一种导入方式；可逐表核对表头和映射后，一次导入整个文件。"
+                : source.mergeSheets ? "全部工作表的数据统一汇总，仍保留每条记录的来源。"
+                : "导入后可按工作表切换，Excel 导出保留各表及空表。缺少主体的记录仍属于原工作表。"}</p>
+            </section>
+          )}
           <div className="mapping-options">
             <label>
               工作表
@@ -135,7 +152,7 @@ export function ImportDrawer(p: Props) {
                 value={source.sheet}
                 options={source.book.SheetNames.map((value) => ({
                   value,
-                  label: value,
+                  label: value + " · " + (preview.groups.find(group => group.name === value)?.records.length ?? 0) + " 条",
                 }))}
                 onChange={p.onSheet}
               />
@@ -146,6 +163,7 @@ export function ImportDrawer(p: Props) {
                 aria-label="表头所在行"
                 min={offset.r + 1}
                 max={offset.r + Math.max(1, rows.length)}
+                disabled={done}
                 value={(cfg?.header || 0) + offset.r + 1}
                 onChange={(value) => {
                   const header = Math.max(
@@ -163,7 +181,7 @@ export function ImportDrawer(p: Props) {
               文本编码
               <Select
                 aria-label="文本编码"
-                disabled={!/\.(csv|tsv)$/i.test(source.name)}
+                disabled={done || !/\.(csv|tsv)$/i.test(source.name)}
                 value={source.encoding}
                 options={[
                   { value: "utf-8", label: "UTF-8" },
@@ -174,8 +192,10 @@ export function ImportDrawer(p: Props) {
               />
             </label>
           </div>
+          <p className="muted-note">当前核对：{source.sheet}。本次添加整个文件的 {source.book.SheetNames.length} 张工作表；各表可以设置不同的表头和映射。</p>
           <div className="mapping-title">
             <h3>核对字段映射</h3>
+            <Button size="small" onClick={() => p.onPanel("fields")}>设置字段</Button>
             <Tag color="cyan">
               已匹配 {Object.values(cfg?.mapping || {}).filter(Boolean).length}{" "}
               / {p.fields.length} 项
@@ -212,6 +232,7 @@ export function ImportDrawer(p: Props) {
                     <Select
                       aria-label={"映射" + f.label}
                       value={value}
+                      disabled={done}
                       options={[
                         { value: "", label: "不导入此字段" },
                         ...headers.map((h, i) => ({
@@ -272,25 +293,26 @@ export function ImportDrawer(p: Props) {
           ) : (
             <Empty description="当前表头行为空，请调整表头所在行" />
           )}
+          {preview.error && <Alert showIcon type="error" title={preview.error} />}
           <div className="import-summary">
             <Alert
               type={done ? "success" : "info"}
               showIcon
               title={
                 done
-                  ? "这张工作表已加入资料库"
+                  ? "这份文件的全部工作表已加入资料库"
                   : `识别 ${records.length} 条非空记录`
               }
               description={
                 done
-                  ? "可切换其他工作表继续导入。"
-                  : `${records.length - missing} 条进入全部客户，${missing} 条进入缺少主体；仅跳过整行空白。`
+                  ? "可在资料库切换工作表，或选择其他文件继续导入。"
+                  : `${records.length - missing} 条进入全部客户，${missing} 条进入缺少主体；仅跳过整行空白。${source.mergeSheets === false || source.book.SheetNames.length === 1 ? "空工作表也会保留。" : ""}`
               }
             />
             <Button
               type="primary"
               size="large"
-              disabled={done || !records.length || p.busy}
+              disabled={done || needsChoice || !!preview.error || (!records.length && source.mergeSheets === true) || p.busy}
               icon={<ArrowRightOutlined />}
               onClick={p.onApply}
             >
@@ -299,6 +321,19 @@ export function ImportDrawer(p: Props) {
           </div>
         </>
       )}
+    </>
+  );
+  return (
+    <Drawer title="导入与映射" open={p.open} onClose={p.onClose} size={1040}
+      className="import-drawer" extra={<Tag color="cyan">文件仅在本地处理</Tag>}>
+      <Tabs activeKey={p.panel} onChange={key => p.onPanel(key as "mapping" | "fields")}
+        items={[
+          { key: "mapping", label: "文件与映射", children: mappingContent },
+          { key: "fields", label: "字段设置", children: <>
+            <FieldSettings fields={p.fields} records={p.customers} onAdd={p.onAddField} onRemove={p.onRemoveField} />
+            <Button onClick={() => p.onPanel("mapping")}>返回文件与映射</Button>
+          </> },
+        ]} />
     </Drawer>
   );
 }

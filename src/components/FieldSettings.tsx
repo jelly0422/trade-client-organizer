@@ -1,20 +1,16 @@
 import { useState } from "react";
-import { App, Button, Drawer, Input, Tag, Tooltip } from "antd";
+import { App, Button, Input, Tag, Tooltip } from "antd";
 import { DeleteOutlined, LockOutlined, PlusOutlined } from "@ant-design/icons";
 import * as C from "../domain/core";
 import type { Field, Customer } from "../domain/core";
 
 interface Props {
-  open: boolean;
-  onClose: () => void;
   fields: Field[];
   records: Customer[];
   onAdd: (name: string) => void;
   onRemove: (key: string) => void;
 }
-export function FieldsDrawer({
-  open,
-  onClose,
+export function FieldSettings({
   fields,
   records,
   onAdd,
@@ -44,7 +40,7 @@ export function FieldsDrawer({
     else onRemove(field.key);
   };
   return (
-    <Drawer title="管理表格字段" open={open} onClose={onClose} size={460}>
+    <section className="integrated-fields" aria-label="字段设置">
       <div className="drawer-intro">
         <span className="eyebrow">YOUR WORKSPACE</span>
         <h2>让每一列，适合你的业务</h2>
@@ -95,6 +91,6 @@ export function FieldsDrawer({
       <p className="muted-note">
         客户名称、公司名和邮箱不可删除。字段配置随整理进度自动保存到当前浏览器。
       </p>
-    </Drawer>
+    </section>
   );
 }

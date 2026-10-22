@@ -1,5 +1,6 @@
 import * as C from "../domain/core.ts";
 import type { Customer, Field } from "../domain/core.ts";
+import type { WorkspaceSheet } from "../domain/sheets.ts";
 
 export type Category = "all" | "review" | "duplicate" | "missing";
 export const MAX_RECORDS = 50000;
@@ -8,16 +9,18 @@ export interface Workspace {
   records: Customer[];
   dirty: boolean;
   deleted: { record: Customer; index: number }[];
+  sheets: WorkspaceSheet[];
 }
 export const initialWorkspace = (): Workspace => ({
   fields: C.fields.map((f) => ({ ...f })),
   records: [],
   dirty: false,
   deleted: [],
+  sheets: [],
 });
 export type Action =
   | { type: "restore"; workspace: Workspace }
-  | { type: "append"; records: Customer[] }
+  | { type: "append"; records: Customer[]; sheets?: WorkspaceSheet[] }
   | { type: "edit"; id: string; key: string; value: string }
   | { type: "delete"; ids: string[] }
   | { type: "undoDelete" }
@@ -32,8 +35,18 @@ export function reducer(state: Workspace, action: Action): Workspace {
   if (action.type === "append") {
     if (state.records.length + action.records.length > MAX_RECORDS)
       throw Error("当前最多保留 50,000 条记录，请分批整理。");
+    const sheets = [...state.sheets];
+    const ids = new Set(sheets.map(s => s.id));
+    for (const sheet of action.sheets || []) {
+      if (ids.has(sheet.id)) throw Error("这张工作表已导入，请勿重复添加。");
+      sheets.push(sheet);
+      ids.add(sheet.id);
+    }
+    if (action.records.some(r => r.sheetId && !ids.has(r.sheetId)))
+      throw Error("无法添加记录：对应的工作表不存在。");
     return {
       ...state,
+      sheets,
       records: [...state.records, ...action.records],
       dirty: true,
     };
@@ -79,6 +92,7 @@ export function reducer(state: Workspace, action: Action): Workspace {
       const restored: Customer = {
         id: record.id, source: record.source, sourceRow: record.sourceRow,
         sourceCells: record.sourceCells, pendingIdentity: record.pendingIdentity,
+        ...(record.sheetId ? { sheetId: record.sheetId } : {}),
         ...Object.fromEntries(state.fields.map(f => [f.key, record[f.key] ?? ""])),
       };
       records.splice(Math.min(index, records.length), 0, restored);

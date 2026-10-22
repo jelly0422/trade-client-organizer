@@ -31,6 +31,7 @@ import {
 } from "ag-grid-community";
 import * as C from "../domain/core";
 import type { Customer, Field } from "../domain/core";
+import { UNGROUPED_SHEET, type WorkspaceSheet } from "../domain/sheets";
 import type { Category, summarize } from "../state/workspace";
 import { RulesPanel } from "./RulesPanel";
 
@@ -53,6 +54,10 @@ const gridTheme = themeQuartz.withParams({
 interface Props {
   fields: Field[];
   records: Customer[];
+  sheetGroups: Array<WorkspaceSheet & { records: Customer[] }>;
+  sheetSelection: string;
+  onSheetSelection: (id: string) => void;
+  multipleSheets: boolean;
   filtered: Customer[];
   category: Category;
   summary: ReturnType<typeof summarize>;
@@ -90,7 +95,7 @@ export function CustomerLibrary(p: Props) {
   }, []);
   useEffect(() => {
     grid.current?.api?.ensureColumnVisible("company", "start");
-  }, [p.category, p.query]);
+  }, [p.category, p.query, p.sheetSelection]);
   const page = Math.min(
     p.page,
     Math.max(1, Math.ceil(p.filtered.length / p.pageSize)),
@@ -282,18 +287,28 @@ export function CustomerLibrary(p: Props) {
             onChange={p.onFormat}
             options={[
               { value: "xlsx", label: "Excel (.xlsx)" },
-              { value: "csv", label: "CSV (.csv)" },
+              { value: "csv", label: p.multipleSheets ? "CSV 不支持多表" : "CSV (.csv)", disabled: p.multipleSheets },
             ]}
           />
           <Button
             icon={<DownloadOutlined />}
-            disabled={!p.records.length}
+            disabled={!p.records.length && !p.sheetGroups.some(s => s.id !== UNGROUPED_SHEET)}
             onClick={p.onExport}
           >
             导出客户表
           </Button>
         </div>
       </div>
+      {p.sheetGroups.some(s => s.id !== UNGROUPED_SHEET) && <div className="library-sheet-switcher">
+        <label htmlFor="library-sheet-selection">查看工作表</label>
+        <Select id="library-sheet-selection" aria-label="资料库工作表" showSearch optionFilterProp="label"
+          value={p.sheetSelection} onChange={p.onSheetSelection}
+          options={[
+            { value: "", label: "全部工作表 · " + p.records.length + " 条" },
+            ...p.sheetGroups.map(s => ({ value: s.id, label: s.name + " · " + s.records.length + " 条 · " + s.sourceName })),
+          ]} />
+        <span>新增客户归入{(p.sheetGroups.find(s => s.id === p.sheetSelection) || (p.sheetGroups.length === 1 ? p.sheetGroups[0] : null))?.name || "客户资料"}；导出包含全部工作表。</span>
+      </div>}
       <RulesPanel category={p.category} />
       <div className="library-toolbar">
         <Input
@@ -446,7 +461,8 @@ export function CustomerLibrary(p: Props) {
       </div>
       <div className="export-footnote">
         <LockIcon />
-        导出包含全部记录与原始内容，不受当前搜索、分类或分页影响。
+        {p.multipleSheets ? "Excel 导出保留独立工作表与空表；同名表自动加序号。" : "导出包含全部记录与原始内容。"}
+        不受当前工作表筛选、搜索、分类或分页影响。
       </div>
     </section>
   );
